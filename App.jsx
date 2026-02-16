@@ -92,7 +92,7 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,
 @media(max-width:768px){.dn{display:none!important}.mb{display:flex!important}.mg{grid-template-columns:repeat(2,1fr)!important}}`;
 
 export default function App() {
-  const [pg, setPg] = useState("home");
+  const [pg, setPg] = useState(() => pageFromPath());
   const [ac, setAc] = useState("penny");
   const [picks, setP] = useState({});
   const [charts, setCh] = useState({});
