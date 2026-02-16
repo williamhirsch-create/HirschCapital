@@ -58,8 +58,20 @@ const FB = {
   hyper:{ticker:"NVDA",company:"NVIDIA Corporation",exchange:"NASDAQ",price:728.50,change_pct:3.8,market_cap:"1.82T",avg_volume:"42M",relative_volume:1.8,atr_pct:3.2,float_val:"2.4B",short_interest:"1.2%",gap_pct:1.9,premarket_vol:"6.1M",hirsch_score:91,thesis_summary:"All major hyperscalers guided AI capex higher — unanimously bullish through 2026|Blackwell architecture demand exceeding supply by estimated 3-4x ratio|Cloud concentration risk offset by emerging sovereign AI demand vector|Weekly chart maintains higher lows — technical momentum fully intact",catalysts:"NVIDIA continues benefiting from unprecedented AI infrastructure demand. All major hyperscalers (Microsoft, Google, Amazon, Meta) guided capex higher in recent earnings calls, directly supporting NVIDIA's revenue trajectory.\n\nBlackwell GPU demand far exceeds supply capacity. Management commentary suggests supply constraints persist through at least mid-2026, supporting pricing power and forward visibility.",upside_drivers:"Convergence of hyperscaler capex expansion, Blackwell demand, and sovereign AI spending creates multiple independent demand vectors. Any positive supply chain development or major new customer announcement could catalyze the next significant leg higher.",key_levels:"Support at $695 (20-day MA). Psychological resistance at $750. Breakout target $800+ on sustained institutional volume.",risks:"Customer concentration — top hyperscalers represent significant revenue share|Regulatory risk from potential export control expansion|Premium valuation requires sustained growth execution|Competitive threats from custom silicon (TPU, Trainium, etc.)",invalidation:"Price breaks below $695 on heavy institutional volume|Any major hyperscaler guides capex lower|Export control expansion announced targeting AI chips|Blackwell yield or production issues surface",signal_values:"+35% YoY capex|+122% YoY|1.8x index|Moderate|Low beta|9.5/10|42x fwd",signal_weights:"22|20|12|8|10|18|10",signal_reasons:"Hyperscaler capex directly drives NVIDIA revenue growth|Cloud revenue acceleration sustains premium valuation|Index fund flows remain supportive of price|Regulatory environment currently manageable|Demonstrated macro resilience through rate cycles|Near-impenetrable competitive moat in AI training|Earnings power ratio supports current multiple",what_it_is:"NVIDIA is the dominant designer of GPUs and AI accelerators powering the global buildout of data centers, AI training infrastructure, gaming, and autonomous systems."},
 };
 
-const gP = (b, n, v = .03) => { const d = []; let p = b; const now = new Date(); for (let i = n; i >= 0; i--) { const dt = new Date(now); dt.setDate(dt.getDate() - i); p = Math.max(b * .5, p + (Math.random() - .45) * v * p); d.push({ date: dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }), price: +p.toFixed(2), volume: Math.floor(Math.random() * 8e6 + 2e6) }); } return d; };
+const isMktOpen = (dt) => { const day = dt.getDay(); return day !== 0 && day !== 6; };
+const mktDay = (from = new Date()) => { const dt = new Date(from); while (!isMktOpen(dt)) dt.setDate(dt.getDate() - 1); return dt; };
+const recentMktDays = (count, from = new Date()) => { const days = []; const cursor = mktDay(from); while (days.length < count) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate() - 1); while (!isMktOpen(cursor)) cursor.setDate(cursor.getDate() - 1); } return days; };
+const fD = (dt) => dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const LIVE_DAY = mktDay();
+const HIST_MKT = Object.fromEntries(Object.entries(HIST).map(([id, rows]) => { const dts = recentMktDays(rows.length); return [id, rows.map((row, i) => ({ ...row, d: fD(dts[i]) }))]; }));
+
+const gP = (b, n, v = .03) => { const d = []; let p = b; const dts = recentMktDays(n + 1).reverse(); for (let i = 0; i < dts.length; i++) { const dt = dts[i]; p = Math.max(b * .5, p + (Math.random() - .45) * v * p); d.push({ date: fD(dt), price: +p.toFixed(2), volume: Math.floor(Math.random() * 8e6 + 2e6) }); } return d; };
 const gI = (o) => { const d = []; let p = o; for (let i = 0; i < 78; i++) { const h = 9 + Math.floor((i * 5 + 30) / 60), m = (i * 5 + 30) % 60; p = Math.max(o * .85, p + (Math.random() - .42) * .015 * p); d.push({ time: `${h}:${m.toString().padStart(2, "0")}`, price: +p.toFixed(2), volume: Math.floor(Math.random() * 5e5 + 1e5), vwap: +(p * (.98 + Math.random() * .04)).toFixed(2) }); } return d; };
+const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", interval: "30m" }, "1M": { range: "1mo", interval: "1d" }, "6M": { range: "6mo", interval: "1d" }, "1Y": { range: "1y", interval: "1d" }};
+const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
+const pctRet = (entry, value) => (Number(entry)>0 ? ((Number(value)-Number(entry))/Number(entry))*100 : 0);
 
 const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
 :root{--bg:#FAFAF8;--cd:#FFF;--dk:#0C0F14;--tx:#1A1D23;--mu:#6B7280;--ac:#0066FF;--al:#E8F0FE;--gn:#00C48C;--gl:#E6FAF3;--rd:#FF4757;--rl:#FFF0F1;--am:#F59E0B;--aml:#FEF3C7;--bd:#E8E8E4}
@@ -94,34 +106,102 @@ export default function App() {
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
 
+  const [trackLive, setTrackLive] = useState({});
+
+  const fetchMarket = async (ticker, tf = "1M") => {
+    const cfg = TF_CFG[tf] || TF_CFG["1M"];
+    const rs = await fetch(`/api/market?symbol=${encodeURIComponent(ticker)}&range=${cfg.range}&interval=${cfg.interval}`);
+    if (!rs.ok) throw new Error(`Market fetch failed: ${rs.status}`);
+    return rs.json();
+  };
+
+  const toChartPoints = (rows) => (rows || []).map((r) => {
+    const dt = new Date(r.ts * 1000);
+    const price = Number(r.close ?? r.price ?? 0);
+    return { time: fmtTime(dt), date: fD(dt), price, volume: Number(r.volume || 0), vwap: price };
+  }).filter(r => Number.isFinite(r.price) && r.price > 0);
+
+  const loadLiveCharts = async (id, ticker, bp, v) => {
+    try {
+      const tfs = ["1D", "5D", "1M", "6M", "1Y"];
+      const out = {};
+      let price = null;
+      let prevClose = null;
+      for (const t of tfs) {
+        const mk = await fetchMarket(ticker, t);
+        const pts = toChartPoints(mk.points);
+        out[t] = pts;
+        if (t === "1D" || !price) {
+          const last = mk.points?.[mk.points.length - 1];
+          price = Number(last?.close ?? mk.meta?.regularMarketPrice ?? price);
+          prevClose = Number(mk.meta?.chartPreviousClose ?? mk.meta?.previousClose ?? prevClose);
+        }
+      }
+      setCh(p => ({ ...p, [id]: out }));
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) {
+        const change_pct = +(((price - prevClose) / prevClose) * 100).toFixed(2);
+        setP(p => ({ ...p, [id]: { ...(p[id] || FB[id]), ticker, price: +price.toFixed(2), change_pct } }));
+      }
+      return true;
+    } catch {
+      setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
+      return false;
+    }
+  };
+
+  const loadTrackLive = async (id) => {
+    if (trackLive[id]) return;
+    const rows = HIST_MKT[id] || [];
+    try {
+      const openDays = mktKeySet(140);
+      const updated = await Promise.all(rows.map(async (row, idx) => {
+        const mk = await fetch(`/api/market?symbol=${encodeURIComponent(row.t)}&range=6mo&interval=1d`).then(r => r.ok ? r.json() : null);
+        const daily = (mk?.points || []).filter(pt => openDays.has(ymd(new Date(pt.ts * 1000))));
+        const pick = daily[Math.max(0, daily.length - 1 - idx)] || daily[daily.length - 1];
+        if (!pick) return row;
+        const dt = new Date(pick.ts * 1000);
+        return { ...row, d: fD(dt), e: +Number(pick.open ?? pick.close).toFixed(2), c: +Number(pick.close).toFixed(2), h: +Number(pick.high ?? pick.close).toFixed(2), l: +Number(pick.low ?? pick.close).toFixed(2) };
+      }));
+      setTrackLive(p => ({ ...p, [id]: updated }));
+    } catch {
+      setTrackLive(p => ({ ...p, [id]: rows }));
+    }
+  };
+
   const gen = async (id) => {
     if (picks[id]) return; setLd(id);
     const cat = CATS.find(c => c.id === id);
     const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
     const v = id==="penny"?.05:id==="small"?.035:.02;
-    setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
+    let base = FB[id];
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user",
-          content: `You are the Hirsch Capital quant algorithm. Today: ${new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1\\n\\nP2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
+          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1
+
+P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
         }]})
       });
       const d = await r.json(); const t = d.content?.map(i=>i.text||"").join("\n")||"";
-      setP(p => ({...p,[id]:JSON.parse(t.replace(/```json|```/g,"").trim())}));
-    } catch { setP(p => ({...p,[id]:FB[id]})); }
+      base = JSON.parse(t.replace(/```json|```/g,"").trim());
+    } catch {}
+    setP(p => ({...p,[id]:base}));
+    await loadLiveCharts(id, base.ticker || FB[id].ticker, bp, v);
+    await loadTrackLive(id);
     setLd(null);
   };
 
   useEffect(() => { gen("penny"); }, []);
-  useEffect(() => { gen(ac); }, [ac]);
+  useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
+  useEffect(() => { if (pg === "track") CATS.forEach(c => loadTrackLive(c.id)); }, [pg]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = HIST[ac]||[]; const isLd = ld2===ac&&!pk;
+  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
 
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
 
-  const TT = ({data,limit}) => (<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} className="fs"><thead><tr style={{borderBottom:"2px solid var(--bd)"}}>{["Date","Ticker","Entry","Close","High","Low","Return","Max Run","Score"].map(h=>(<th key={h} style={{padding:"10px",textAlign:"left",fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em"}}>{h}</th>))}</tr></thead><tbody>{(data||[]).slice(0,limit||999).map((p,i)=>{const ret=((p.c-p.e)/p.e*100).toFixed(1);const mr=((p.h-p.e)/p.e*100).toFixed(1);return(<tr key={i} style={{borderBottom:"1px solid var(--bd)"}} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><td style={{padding:"11px 10px",fontSize:13,color:"var(--mu)"}}>{p.d}</td><td style={{padding:"11px 10px",fontSize:14,fontWeight:700}}>{p.t}</td><td style={{padding:"11px 10px",fontSize:13}}>${p.e.toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13}}>${p.c.toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--gn)"}}>${p.h.toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--rd)"}}>${p.l.toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:ret>=0?"var(--gn)":"var(--rd)"}}>{ret>=0?"+":""}{ret}%</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:"var(--gn)"}}>+{mr}%</td><td style={{padding:"11px 10px"}}><span style={{background:p.s>=80?"var(--gl)":"var(--al)",color:p.s>=80?"var(--gn)":"var(--ac)",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{p.s}</span></td></tr>);})}</tbody></table></div>);
+  const TT = ({data,limit}) => (<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} className="fs"><thead><tr style={{borderBottom:"2px solid var(--bd)"}}>{["Date","Ticker","Entry","Close","High","Low","Return","Max Run","Score"].map(h=>(<th key={h} style={{padding:"10px",textAlign:"left",fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em"}}>{h}</th>))}</tr></thead><tbody>{(data||[]).slice(0,limit||999).map((p,i)=>{const retNum=pctRet(p.e,p.c);const mrNum=pctRet(p.e,p.h);const ret=retNum.toFixed(1);const mr=mrNum.toFixed(1);return(<tr key={i} style={{borderBottom:"1px solid var(--bd)"}} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><td style={{padding:"11px 10px",fontSize:13,color:"var(--mu)"}}>{p.d}</td><td style={{padding:"11px 10px",fontSize:14,fontWeight:700}}>{p.t}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.e||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.c||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--gn)"}}>${Number(p.h||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--rd)"}}>${Number(p.l||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:retNum>=0?"var(--gn)":"var(--rd)"}}>{retNum>=0?"+":""}{ret}%</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:mrNum>=0?"var(--gn)":"var(--rd)"}}>{mrNum>=0?"+":""}{mr}%</td><td style={{padding:"11px 10px"}}><span style={{background:p.s>=80?"var(--gl)":"var(--al)",color:p.s>=80?"var(--gn)":"var(--ac)",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{p.s}</span></td></tr>);})}</tbody></table></div>);
 
   // NAV
   const Nav = () => (<nav style={{position:"fixed",top:0,left:0,right:0,zIndex:100,padding:sc?"10px 0":"16px 0",background:sc?"rgba(250,250,248,.88)":"transparent",backdropFilter:sc?"blur(20px)":"none",borderBottom:sc?"1px solid var(--bd)":"none",transition:"all .3s"}} className="fs">
@@ -189,7 +269,7 @@ export default function App() {
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
       <Tabs s={{marginBottom:28}}/>
       <div className="afu">
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span></div>
         <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}><h1 className="ff" style={{fontSize:"clamp(34px,5vw,50px)",letterSpacing:"-.03em"}}>{pk.ticker}</h1><span className="fs" style={{fontSize:15,color:"var(--mu)"}}>{pk.company} · {pk.exchange}</span></div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>{[cat.label,"High Volatility","Educational Only"].map(b=>(<span key={b} className="fs" style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:6,background:b.includes("Vol")?"var(--rl)":b.includes("Edu")?"var(--aml)":"var(--al)",color:b.includes("Vol")?"var(--rd)":b.includes("Edu")?"#92400E":cat.color,textTransform:"uppercase",letterSpacing:".05em"}}>{b}</span>))}</div>
       </div>
@@ -259,15 +339,15 @@ export default function App() {
 
   // TRACK RECORD
   const Track = () => {
-    const h=HIST[ac]||[];const w=h.filter(p=>p.c>p.e).length;
-    const ar=h.length?(h.reduce((a,p)=>a+((p.c-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
-    const mr2=h.length?(h.reduce((a,p)=>a+((p.h-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
+    const h=trackLive[ac]||HIST_MKT[ac]||[];const w=h.filter(p=>pctRet(p.e,p.c)>0).length;
+    const ar=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.c),0)/h.length).toFixed(1):"0";
+    const mr2=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.h),0)/h.length).toFixed(1):"0";
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
       <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses.</p>
       <Tabs s={{marginBottom:24}}/><Disc/>
       <div className="afu d2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:14,margin:"24px 0"}}>
-        {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length}`,c:"var(--gn)"},{l:"Avg Return",v:`${ar}%`,s:"Entry to close",c:ar>=0?"var(--gn)":"var(--rd)"},{l:"Avg Max Run",v:`+${mr2}%`,s:"Entry to high",c:"var(--gn)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
+        {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length}`,c:"var(--gn)"},{l:"Avg Return",v:`${ar}%`,s:"Entry to close",c:ar>=0?"var(--gn)":"var(--rd)"},{l:"Avg Max Run",v:`${Number(mr2)>=0?"+":""}${mr2}%`,s:"Entry to high",c:Number(mr2)>=0?"var(--gn)":"var(--rd)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
       </div>
       <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:22,border:"1px solid var(--bd)"}}><TT data={h}/></div>
       <div style={{background:"var(--aml)",borderRadius:12,padding:"14px 18px",marginTop:20,fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs"><strong>Honesty Mode:</strong> All picks shown — not just winners. Past performance is not predictive. Educational only.</div>
