@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Bar, CartesianGrid, Line } from "recharts";
 
 const CATS = [
@@ -186,6 +186,7 @@ export default function App() {
     await loadLiveCharts(id, base.ticker || FB[id].ticker, bp, v);
     await loadTrackLive(id);
     setLd(null);
+    loadTrackLive(id);
   };
 
   useEffect(() => { gen("penny"); }, []);
