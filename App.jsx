@@ -71,7 +71,6 @@ const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", inte
 const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
-const pctRet = (entry, value) => (Number(entry)>0 ? ((Number(value)-Number(entry))/Number(entry))*100 : 0);
 
 const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
 :root{--bg:#FAFAF8;--cd:#FFF;--dk:#0C0F14;--tx:#1A1D23;--mu:#6B7280;--ac:#0066FF;--al:#E8F0FE;--gn:#00C48C;--gl:#E6FAF3;--rd:#FF4757;--rl:#FFF0F1;--am:#F59E0B;--aml:#FEF3C7;--bd:#E8E8E4}
@@ -177,9 +176,7 @@ export default function App() {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user",
-          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1
-
-P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
+          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1\\n\\nP2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
         }]})
       });
       const d = await r.json(); const t = d.content?.map(i=>i.text||"").join("\n")||"";
@@ -193,10 +190,9 @@ P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalida
 
   useEffect(() => { gen("penny"); }, []);
   useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
-  useEffect(() => { if (pg === "track") CATS.forEach(c => loadTrackLive(c.id)); }, [pg]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
+  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
 
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
@@ -339,9 +335,9 @@ P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalida
 
   // TRACK RECORD
   const Track = () => {
-    const h=trackLive[ac]||HIST_MKT[ac]||[];const w=h.filter(p=>pctRet(p.e,p.c)>0).length;
-    const ar=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.c),0)/h.length).toFixed(1):"0";
-    const mr2=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.h),0)/h.length).toFixed(1):"0";
+    const h=HIST_MKT[ac]||[];const w=h.filter(p=>p.c>p.e).length;
+    const ar=h.length?(h.reduce((a,p)=>a+((p.c-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
+    const mr2=h.length?(h.reduce((a,p)=>a+((p.h-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
       <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses.</p>
