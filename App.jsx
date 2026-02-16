@@ -176,9 +176,7 @@ export default function App() {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user",
-          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1
-
-P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
+          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1\\n\\nP2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
         }]})
       });
       const d = await r.json(); const t = d.content?.map(i=>i.text||"").join("\n")||"";
@@ -194,7 +192,7 @@ P2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalida
   useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
+  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
 
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
