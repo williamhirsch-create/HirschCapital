@@ -67,6 +67,10 @@ const HIST_MKT = Object.fromEntries(Object.entries(HIST).map(([id, rows]) => { c
 
 const gP = (b, n, v = .03) => { const d = []; let p = b; const dts = recentMktDays(n + 1).reverse(); for (let i = 0; i < dts.length; i++) { const dt = dts[i]; p = Math.max(b * .5, p + (Math.random() - .45) * v * p); d.push({ date: fD(dt), price: +p.toFixed(2), volume: Math.floor(Math.random() * 8e6 + 2e6) }); } return d; };
 const gI = (o) => { const d = []; let p = o; for (let i = 0; i < 78; i++) { const h = 9 + Math.floor((i * 5 + 30) / 60), m = (i * 5 + 30) % 60; p = Math.max(o * .85, p + (Math.random() - .42) * .015 * p); d.push({ time: `${h}:${m.toString().padStart(2, "0")}`, price: +p.toFixed(2), volume: Math.floor(Math.random() * 5e5 + 1e5), vwap: +(p * (.98 + Math.random() * .04)).toFixed(2) }); } return d; };
+const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", interval: "30m" }, "1M": { range: "1mo", interval: "1d" }, "6M": { range: "6mo", interval: "1d" }, "1Y": { range: "1y", interval: "1d" }};
+const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
 
 const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
 :root{--bg:#FAFAF8;--cd:#FFF;--dk:#0C0F14;--tx:#1A1D23;--mu:#6B7280;--ac:#0066FF;--al:#E8F0FE;--gn:#00C48C;--gl:#E6FAF3;--rd:#FF4757;--rl:#FFF0F1;--am:#F59E0B;--aml:#FEF3C7;--bd:#E8E8E4}
@@ -101,12 +105,74 @@ export default function App() {
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
 
+  const [trackLive, setTrackLive] = useState({});
+
+  const fetchMarket = async (ticker, tf = "1M") => {
+    const cfg = TF_CFG[tf] || TF_CFG["1M"];
+    const rs = await fetch(`/api/market?symbol=${encodeURIComponent(ticker)}&range=${cfg.range}&interval=${cfg.interval}`);
+    if (!rs.ok) throw new Error(`Market fetch failed: ${rs.status}`);
+    return rs.json();
+  };
+
+  const toChartPoints = (rows) => (rows || []).map((r) => {
+    const dt = new Date(r.ts * 1000);
+    const price = Number(r.close ?? r.price ?? 0);
+    return { time: fmtTime(dt), date: fD(dt), price, volume: Number(r.volume || 0), vwap: price };
+  }).filter(r => Number.isFinite(r.price) && r.price > 0);
+
+  const loadLiveCharts = async (id, ticker, bp, v) => {
+    try {
+      const tfs = ["1D", "5D", "1M", "6M", "1Y"];
+      const out = {};
+      let price = null;
+      let prevClose = null;
+      for (const t of tfs) {
+        const mk = await fetchMarket(ticker, t);
+        const pts = toChartPoints(mk.points);
+        out[t] = pts;
+        if (t === "1D" || !price) {
+          const last = mk.points?.[mk.points.length - 1];
+          price = Number(last?.close ?? mk.meta?.regularMarketPrice ?? price);
+          prevClose = Number(mk.meta?.chartPreviousClose ?? mk.meta?.previousClose ?? prevClose);
+        }
+      }
+      setCh(p => ({ ...p, [id]: out }));
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) {
+        const change_pct = +(((price - prevClose) / prevClose) * 100).toFixed(2);
+        setP(p => ({ ...p, [id]: { ...(p[id] || FB[id]), ticker, price: +price.toFixed(2), change_pct } }));
+      }
+      return true;
+    } catch {
+      setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
+      return false;
+    }
+  };
+
+  const loadTrackLive = async (id) => {
+    if (trackLive[id]) return;
+    const rows = HIST_MKT[id] || [];
+    try {
+      const openDays = mktKeySet(140);
+      const updated = await Promise.all(rows.map(async (row, idx) => {
+        const mk = await fetch(`/api/market?symbol=${encodeURIComponent(row.t)}&range=6mo&interval=1d`).then(r => r.ok ? r.json() : null);
+        const daily = (mk?.points || []).filter(pt => openDays.has(ymd(new Date(pt.ts * 1000))));
+        const pick = daily[Math.max(0, daily.length - 1 - idx)] || daily[daily.length - 1];
+        if (!pick) return row;
+        const dt = new Date(pick.ts * 1000);
+        return { ...row, d: fD(dt), e: +Number(pick.open ?? pick.close).toFixed(2), c: +Number(pick.close).toFixed(2), h: +Number(pick.high ?? pick.close).toFixed(2), l: +Number(pick.low ?? pick.close).toFixed(2) };
+      }));
+      setTrackLive(p => ({ ...p, [id]: updated }));
+    } catch {
+      setTrackLive(p => ({ ...p, [id]: rows }));
+    }
+  };
+
   const gen = async (id) => {
     if (picks[id]) return; setLd(id);
     const cat = CATS.find(c => c.id === id);
     const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
     const v = id==="penny"?.05:id==="small"?.035:.02;
-    setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
+    let base = FB[id];
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user",
@@ -114,13 +180,16 @@ export default function App() {
         }]})
       });
       const d = await r.json(); const t = d.content?.map(i=>i.text||"").join("\n")||"";
-      setP(p => ({...p,[id]:JSON.parse(t.replace(/```json|```/g,"").trim())}));
-    } catch { setP(p => ({...p,[id]:FB[id]})); }
+      base = JSON.parse(t.replace(/```json|```/g,"").trim());
+    } catch {}
+    setP(p => ({...p,[id]:base}));
+    await loadLiveCharts(id, base.ticker || FB[id].ticker, bp, v);
+    await loadTrackLive(id);
     setLd(null);
   };
 
   useEffect(() => { gen("penny"); }, []);
-  useEffect(() => { gen(ac); }, [ac]);
+  useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
   const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
