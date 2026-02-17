@@ -128,11 +128,12 @@ export default function App() {
   const [ac, setAc] = useState("penny");
   const [picks, setP] = useState({});
   const [charts, setCh] = useState({});
-  const [ld2, setLd] = useState(null);
   const [tf, setTf] = useState("1D");
   const [sc, setSc] = useState(false);
   const [dataStatus, setDataStatus] = useState({});
   const [mm, setMm] = useState(false);
+  const [preloadReady, setPreloadReady] = useState(false);
+  const [preloadProgress, setPreloadProgress] = useState({ step: "", done: 0, total: 10 });
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
   useEffect(() => { const path = pg === "home" ? "/" : `/${pg}`; if (window.location.pathname !== path) window.history.pushState(null, "", path); }, [pg]);
@@ -147,13 +148,22 @@ export default function App() {
     return rs.json();
   };
 
+  const fetchQuote = async (ticker) => {
+    try {
+      const rs = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
+      if (!rs.ok) return null;
+      return rs.json();
+    } catch { return null; }
+  };
+
   const toChartPoints = (rows) => (rows || []).map((r) => {
     const dt = new Date(r.ts * 1000);
     const price = Number(r.close ?? r.price ?? 0);
     return { time: fmtTime(dt), date: fD(dt), price, volume: Number(r.volume || 0), vwap: price };
   }).filter(r => Number.isFinite(r.price) && r.price > 0);
 
-  const loadLiveCharts = async (id, ticker, bp, v) => {
+  /** Load all 5 timeframes of chart data for a single category */
+  const loadChartsForCategory = async (id, ticker, bp, v) => {
     try {
       const tfs = ["1D", "5D", "1M", "6M", "1Y"];
       const out = {};
@@ -171,19 +181,20 @@ export default function App() {
           if (last?.ts) lastTs = last.ts * 1000;
         }
       }
-      setCh(p => ({ ...p, [id]: out }));
       const isStale = lastTs ? (Date.now() - lastTs) > 48 * 60 * 60 * 1000 : true;
       const hasData = Object.values(out).some(pts => pts.length > 0);
-      setDataStatus(p => ({ ...p, [id]: hasData ? (isStale ? "delayed" : "live") : "offline" }));
+      const status = hasData ? (isStale ? "delayed" : "live") : "offline";
+      let priceUpdate = null;
       if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) {
-        const change_pct = +(((price - prevClose) / prevClose) * 100).toFixed(2);
-        setP(p => ({ ...p, [id]: { ...(p[id] || FB[id]), ticker, price: +price.toFixed(2), change_pct } }));
+        priceUpdate = { price: +price.toFixed(2), change_pct: +(((price - prevClose) / prevClose) * 100).toFixed(2) };
       }
-      return true;
+      return { charts: out, status, priceUpdate };
     } catch {
-      setDataStatus(p => ({ ...p, [id]: "offline" }));
-      setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
-      return false;
+      return {
+        charts: {"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)},
+        status: "offline",
+        priceUpdate: null,
+      };
     }
   };
 
@@ -219,36 +230,120 @@ export default function App() {
     } catch { return null; }
   };
 
-  const gen = async (id) => {
-    if (picks[id]) return; setLd(id);
-    const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
-    const v = id==="penny"?.05:id==="small"?.035:.02;
-    let base = FB[id];
-    try {
-      // Primary: fetch from backend API which uses live Yahoo Finance data
-      const apiData = await fetchApiPicks();
-      if (apiData?.picks?.[id]) {
-        base = apiData.picks[id];
-        // Also load all other categories from the same API response
-        for (const [catId, pick] of Object.entries(apiData.picks)) {
-          if (catId !== id && pick?.ticker) {
-            setP(p => p[catId] ? p : ({...p, [catId]: pick}));
-          }
-        }
-      }
-    } catch {}
-    setP(p => ({...p,[id]:base}));
-    await loadLiveCharts(id, base.ticker || FB[id].ticker, bp, v);
-    await loadTrackLive(id);
-    setLd(null);
-    loadTrackLive(id);
+  /** Validate that a pick has all critical fields filled with real data */
+  const validatePick = (pick) => {
+    if (!pick || !pick.ticker || pick.ticker === "N/A") return false;
+    if (!pick.company) return false;
+    if (!Number.isFinite(pick.price) || pick.price <= 0) return false;
+    if (!pick.hirsch_score || pick.hirsch_score <= 0) return false;
+    if (!pick.thesis_summary || pick.thesis_summary.includes("Loading")) return false;
+    if (!pick.signal_values || pick.signal_values.includes("...")) return false;
+    return true;
   };
 
-  useEffect(() => { gen("penny"); }, []);
-  useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
+  /** Enrich a pick with live quote data for fields that may be missing */
+  const enrichPickWithQuote = async (pick) => {
+    if (!pick?.ticker || pick.ticker === "N/A") return pick;
+    const q = await fetchQuote(pick.ticker);
+    if (!q) return pick;
+    const enriched = { ...pick };
+    // Update price and change if quote has fresher data
+    if (Number.isFinite(q.price) && q.price > 0) {
+      enriched.price = +q.price.toFixed(2);
+      enriched.change_pct = q.change_pct ?? enriched.change_pct;
+    }
+    // Fill in missing fields from quote
+    if (!enriched.market_cap || enriched.market_cap === "N/A") enriched.market_cap = q.market_cap || enriched.market_cap;
+    if (!enriched.avg_volume || enriched.avg_volume === "N/A") enriched.avg_volume = q.avg_volume || enriched.avg_volume;
+    if (!enriched.float_val || enriched.float_val === "N/A") enriched.float_val = q.float_val || enriched.float_val;
+    if (!enriched.short_interest || enriched.short_interest === "N/A") enriched.short_interest = q.short_interest || enriched.short_interest;
+    if (!enriched.premarket_vol || enriched.premarket_vol === "N/A") enriched.premarket_vol = q.premarket_vol || enriched.premarket_vol;
+    if (!enriched.exchange || enriched.exchange === "N/A") enriched.exchange = q.exchange || enriched.exchange;
+    if (!enriched.company) enriched.company = q.company || enriched.company;
+    return enriched;
+  };
+
+  /** Master preload: fetch all picks, enrich with quotes, load all charts — then mark ready */
+  const preloadAllData = async () => {
+    const catIds = CATS.map(c => c.id);
+    const totalSteps = 1 + catIds.length + catIds.length; // api + quotes + charts
+    let done = 0;
+    const progress = (step) => { done++; setPreloadProgress({ step, done, total: totalSteps }); };
+
+    // Step 1: Fetch all picks from the backend API
+    setPreloadProgress({ step: "Fetching live picks from algorithm...", done: 0, total: totalSteps });
+    const apiData = await fetchApiPicks();
+    progress("Picks loaded");
+
+    // Step 2: Enrich each category's pick with live quote data (parallel)
+    const enrichedPicks = {};
+    await Promise.all(catIds.map(async (id) => {
+      let pick = apiData?.picks?.[id] || FB[id];
+      pick = await enrichPickWithQuote(pick);
+      enrichedPicks[id] = pick;
+      progress(`${pick.ticker} quote loaded`);
+    }));
+
+    // Set all picks at once
+    setP(enrichedPicks);
+
+    // Step 3: Load charts for all categories in parallel
+    const allCharts = {};
+    const allStatus = {};
+    await Promise.all(catIds.map(async (id) => {
+      const pick = enrichedPicks[id];
+      const ticker = pick?.ticker || FB[id].ticker;
+      const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
+      const v = id==="penny"?.05:id==="small"?.035:.02;
+      const result = await loadChartsForCategory(id, ticker, bp, v);
+      allCharts[id] = result.charts;
+      allStatus[id] = result.status;
+      // Update price from chart data if available
+      if (result.priceUpdate) {
+        enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
+      }
+      progress(`${ticker} charts loaded`);
+    }));
+
+    // Set all charts and status at once
+    setCh(allCharts);
+    setDataStatus(allStatus);
+    setP({ ...enrichedPicks }); // re-set with any price updates from charts
+
+    // Step 4: Validate all picks — flag any that still have issues
+    for (const id of catIds) {
+      if (!validatePick(enrichedPicks[id])) {
+        // Try one more fetch cycle for any invalid picks
+        try {
+          const q = await fetchQuote(enrichedPicks[id]?.ticker || FB[id].ticker);
+          if (q && Number.isFinite(q.price) && q.price > 0) {
+            enrichedPicks[id] = { ...enrichedPicks[id], price: +q.price.toFixed(2), change_pct: q.change_pct ?? 0 };
+          }
+        } catch {}
+      }
+    }
+    setP({ ...enrichedPicks });
+
+    // Load track records in background (not blocking page render)
+    catIds.forEach(id => loadTrackLive(id));
+
+    setPreloadReady(true);
+  };
+
+  // Start preloading all data immediately on mount
+  const preloadStarted = useRef(false);
+  useEffect(() => {
+    if (!preloadStarted.current) {
+      preloadStarted.current = true;
+      preloadAllData();
+    }
+  }, []);
+
+  // When switching categories, load track data if not already loaded
+  useEffect(() => { loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
+  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = !preloadReady;
 
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
@@ -326,8 +421,31 @@ export default function App() {
   </div>);
 
   // PICK PAGE
+  const PreloadScreen = () => {
+    const pct = preloadProgress.total > 0 ? Math.round((preloadProgress.done / preloadProgress.total) * 100) : 0;
+    return (<div style={{maxWidth:520,margin:"0 auto",padding:"160px 24px 60px",textAlign:"center"}}>
+      <div style={{width:64,height:64,borderRadius:16,background:"linear-gradient(135deg,#0C0F14,#1E2330)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:28,margin:"0 auto 28px"}} className="ff">H</div>
+      <h2 className="ff" style={{fontSize:28,marginBottom:8,letterSpacing:"-.02em"}}>Loading Live Data</h2>
+      <p className="fs" style={{color:"var(--mu)",marginBottom:32,fontSize:14,lineHeight:1.6}}>Fetching real-time market data, validating signals, and preparing all five categories.</p>
+      <div style={{width:"100%",height:6,background:"#E8E8E4",borderRadius:3,overflow:"hidden",marginBottom:16}}>
+        <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(90deg,var(--ac),var(--gn))",borderRadius:3,transition:"width .3s ease"}}/>
+      </div>
+      <div className="fs" style={{fontSize:12,color:"var(--mu)",marginBottom:8}}>{pct}% complete</div>
+      <div className="fs" style={{fontSize:13,color:"var(--tx)",fontWeight:500,minHeight:20}}>{preloadProgress.step}</div>
+      <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:28,flexWrap:"wrap"}}>
+        {CATS.map(c => {
+          const loaded = !!picks[c.id] && validatePick(picks[c.id]);
+          return (<div key={c.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 12px",borderRadius:8,background:loaded?"var(--gl)":"#F3F4F6",fontSize:11,fontWeight:600,color:loaded?"var(--gn)":"var(--mu)",transition:"all .3s"}}>
+            {loaded ? <span style={{fontSize:10}}>&#10003;</span> : <div style={{width:10,height:10,border:"2px solid var(--mu)",borderTopColor:"transparent",borderRadius:"50%",animation:"sp .8s linear infinite"}}/>}
+            {c.short}
+          </div>);
+        })}
+      </div>
+    </div>);
+  };
+
   const Pick = () => {
-    if(isLd||!pk) return(<div style={{maxWidth:940,margin:"120px auto",padding:"0 24px"}}><div className="sk" style={{height:36,width:200,marginBottom:12}}/><div className="sk" style={{height:20,width:300,marginBottom:32}}/><div className="sk" style={{height:350,marginBottom:20}}/></div>);
+    if(isLd||!pk) return <PreloadScreen/>;
     const sb=pk.thesis_summary?.split("|")||[];const rk=pk.risks?.split("|")||[];const iv=pk.invalidation?.split("|")||[];
     const sv=pk.signal_values?.split("|")||[];const sw=pk.signal_weights?.split("|")||[];const sr=pk.signal_reasons?.split("|")||[];
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
@@ -458,6 +576,6 @@ export default function App() {
     <style>{CSS}</style><Nav/>
     {pg==="home"&&<Home/>}{pg==="pick"&&<Pick/>}{pg==="track"&&<Track/>}{pg==="method"&&<Method/>}{pg==="about"&&<About/>}
     <Foot/>
-    {ld2&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--dk)",color:"#fff",padding:"12px 20px",borderRadius:12,display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,.3)"}}><div style={{width:14,height:14,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"#fff",borderRadius:"50%",animation:"sp .8s linear infinite"}}/><span className="fs" style={{fontSize:13}}>Generating {CATS.find(c=>c.id===ld2)?.label} pick...</span></div>}
+    {!preloadReady&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--dk)",color:"#fff",padding:"12px 20px",borderRadius:12,display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,.3)"}}><div style={{width:14,height:14,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"#fff",borderRadius:"50%",animation:"sp .8s linear infinite"}}/><span className="fs" style={{fontSize:13}}>Loading live market data... {Math.round((preloadProgress.done / Math.max(1, preloadProgress.total)) * 100)}%</span></div>}
   </div></ErrorBoundary>);
 }
