@@ -83,7 +83,7 @@ const STATIC_PICKS = {
   },
   small: {
     ticker: "IONQ", company: "IonQ Inc", exchange: "NYSE",
-    price: 28.50, change_pct: 4.2, market_cap: "1.4B", avg_volume: "15.8M",
+    price: 28.50, change_pct: 4.2, market_cap: "7.4B", avg_volume: "15.8M",
     relative_volume: 2.4, atr_pct: 6.1, float_val: "168.5M", short_interest: "9.2%",
     gap_pct: 1.8, premarket_vol: "1.8M", hirsch_score: 84,
     what_it_is: "IonQ Inc is a leader in quantum computing, developing general-purpose trapped-ion quantum computers. The company's systems are available through AWS, Microsoft Azure, and Google Cloud. IonQ focuses on making quantum computing accessible for enterprise and research applications spanning optimization, simulation, and machine learning.",
@@ -99,7 +99,7 @@ const STATIC_PICKS = {
   },
   mid: {
     ticker: "CRWD", company: "CrowdStrike Holdings", exchange: "NASDAQ",
-    price: 365.20, change_pct: 2.6, market_cap: "8.2B", avg_volume: "4.8M",
+    price: 365.20, change_pct: 2.6, market_cap: "88.7B", avg_volume: "4.8M",
     relative_volume: 1.8, atr_pct: 3.8, float_val: "228.4M", short_interest: "3.4%",
     gap_pct: 0.9, premarket_vol: "520K", hirsch_score: 82,
     what_it_is: "CrowdStrike Holdings Inc provides cloud-delivered cybersecurity solutions through its Falcon platform. The company offers endpoint protection, threat intelligence, cloud security, and identity protection services. CrowdStrike serves enterprises and government agencies worldwide with AI-powered security.",
