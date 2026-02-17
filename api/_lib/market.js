@@ -129,6 +129,24 @@ export const computeMetrics = (chart, quote = null) => {
   // Average volume formatted
   const fmtVol = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(Math.round(v));
 
+  // Float shares from Yahoo quote
+  const floatShares = quote?.floatShares;
+  const float_val = Number.isFinite(floatShares) && floatShares > 0
+    ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
+    : null;
+
+  // Short interest from Yahoo quote
+  const shortPct = quote?.shortPercentOfFloat;
+  const short_interest = Number.isFinite(shortPct) && shortPct > 0
+    ? `${(shortPct * 100).toFixed(1)}%`
+    : null;
+
+  // Pre-market volume from Yahoo quote
+  const pmVol = quote?.preMarketVolume;
+  const premarket_vol = Number.isFinite(pmVol) && pmVol > 0
+    ? fmtVol(pmVol)
+    : null;
+
   return {
     price: +price.toFixed(2),
     prevClose: +prevClose.toFixed(2),
@@ -149,5 +167,8 @@ export const computeMetrics = (chart, quote = null) => {
     avgVolume: avgVol,
     avgVolume_fmt: fmtVol(avgVol),
     todayVolume_fmt: fmtVol(todayVol),
+    float_val,
+    short_interest,
+    premarket_vol,
   };
 };
