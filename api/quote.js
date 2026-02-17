@@ -47,17 +47,27 @@ export default async function handler(req, res) {
     const shortPct = q.shortPercentOfFloat;
     const pmVol = q.preMarketVolume;
 
+    // Build response with validated numeric fields
+    const capStr = fmtCap(q.marketCap);
+    const avgVolStr = q.averageDailyVolume3Month ? fmtVol(q.averageDailyVolume3Month) : null;
+    const floatStr = Number.isFinite(floatShares) && floatShares > 0
+      ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
+      : null;
+    const shortStr = Number.isFinite(shortPct) && shortPct > 0 ? `${(shortPct * 100).toFixed(1)}%` : null;
+    const pmVolStr = Number.isFinite(pmVol) && pmVol > 0 ? fmtVol(pmVol) : null;
+
+    // Double-check: only include formatted values that look like valid short numeric strings
+    const validMetric = (v) => v && typeof v === 'string' && v.length <= 20 && /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(v.trim());
+
     return res.status(200).json({
       symbol: q.symbol,
       price: q.regularMarketPrice,
       change_pct: q.regularMarketChangePercent != null ? +q.regularMarketChangePercent.toFixed(2) : 0,
-      market_cap: fmtCap(q.marketCap),
-      avg_volume: q.averageDailyVolume3Month ? fmtVol(q.averageDailyVolume3Month) : null,
-      float_val: Number.isFinite(floatShares) && floatShares > 0
-        ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
-        : null,
-      short_interest: Number.isFinite(shortPct) && shortPct > 0 ? `${(shortPct * 100).toFixed(1)}%` : null,
-      premarket_vol: Number.isFinite(pmVol) && pmVol > 0 ? fmtVol(pmVol) : null,
+      market_cap: validMetric(capStr) ? capStr : null,
+      avg_volume: validMetric(avgVolStr) ? avgVolStr : null,
+      float_val: validMetric(floatStr) ? floatStr : null,
+      short_interest: validMetric(shortStr) ? shortStr : null,
+      premarket_vol: validMetric(pmVolStr) ? pmVolStr : null,
       premarket_price: q.preMarketPrice || null,
       exchange: q.exchangeName || q.exchange,
       company: q.longName || q.shortName,

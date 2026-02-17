@@ -12,6 +12,14 @@ const fmtCap = (cap) => {
   return `${Math.round(cap / 1e6)}M`;
 };
 
+/** Validate a metric string is a short formatted number, not description text */
+const isValidMetric = (v) => {
+  if (!v || v === 'N/A') return true;
+  const s = String(v).trim();
+  if (s.length > 20) return false;
+  return /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(s);
+};
+
 const fitsCategory = (metrics, cat) => {
   if (!metrics) return false;
   const price = metrics.price;
@@ -236,20 +244,27 @@ const selectTopPick = async (categoryId, dateKey) => {
   const signalValues = formatSignalValues(m);
   const signalReasons = generateSignalReasons(m, categoryId);
 
+  // Validate formatted metric fields — reject any that are long text or non-numeric
+  const capStr = fmtCap(m.marketCap);
+  const avgVolStr = m.avgVolume_fmt;
+  const floatStr = m.float_val || 'N/A';
+  const shortStr = m.short_interest || 'N/A';
+  const pmVolStr = m.premarket_vol || 'N/A';
+
   return {
     ticker: winner.ticker,
     company: winner.company,
     exchange: winner.exchange,
     price: m.price,
     change_pct: m.change_pct,
-    market_cap: fmtCap(m.marketCap),
-    avg_volume: m.avgVolume_fmt,
+    market_cap: isValidMetric(capStr) ? capStr : 'N/A',
+    avg_volume: isValidMetric(avgVolStr) ? avgVolStr : 'N/A',
     relative_volume: m.relative_volume,
     atr_pct: m.atr_pct,
-    float_val: m.float_val || 'N/A',
-    short_interest: m.short_interest || 'N/A',
+    float_val: isValidMetric(floatStr) ? floatStr : 'N/A',
+    short_interest: isValidMetric(shortStr) ? shortStr : 'N/A',
     gap_pct: m.gap_pct,
-    premarket_vol: m.premarket_vol || 'N/A',
+    premarket_vol: isValidMetric(pmVolStr) ? pmVolStr : 'N/A',
     hirsch_score: winner.hirsch_score,
     date: dateKey,
     category: categoryId,

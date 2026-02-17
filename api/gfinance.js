@@ -87,6 +87,15 @@ export default async function handler(req, res) {
       return v;
     };
 
+    /** Validate that an extracted value looks like a short numeric metric (e.g. "1.3B", "32.4M", "$520K")
+     *  and not a long description or HTML fragment */
+    const isNumericMetric = (v) => {
+      if (!v) return false;
+      const s = String(v).trim();
+      if (s.length > 20) return false;  // Reject long description text
+      return /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(s);
+    };
+
     // Extract key-value pairs from the stats section
     // Pattern: label followed by a value in subsequent elements
     const extractStat = (label) => {
@@ -101,7 +110,11 @@ export default async function handler(req, res) {
       ];
       for (const pat of patterns) {
         const m = html.match(pat);
-        if (m && m[1]) return fmtVal(m[1]);
+        if (m && m[1]) {
+          const val = fmtVal(m[1]);
+          // Only accept values that look like short numeric metrics, reject description text
+          if (isNumericMetric(val)) return val;
+        }
       }
       return null;
     };
