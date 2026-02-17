@@ -729,9 +729,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* METRICS — each value is validated as a short numeric string; long text / descriptions are replaced with "N/A" */}
+      {/* METRICS — skeleton bars shown while live data loads; values shown once live/delayed/offline */}
       <div className="afu d2 mg" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:18}}>
-        {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div><div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div></div>);})}
+        {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";const loading=ds==="static"||ds==="loading";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div>{loading?<div className="sk" style={{height:18,width:"65%",marginTop:4,borderRadius:4}}/>:<div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div>}</div>);})}
       </div>
 
       {/* HIRSCH SCORE */}
