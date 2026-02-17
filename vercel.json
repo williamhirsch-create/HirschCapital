@@ -1,5 +1,8 @@
 {
+  "crons": [
+    { "path": "/api/cron/daily-picks", "schedule": "0 * * * *" }
+  ],
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
