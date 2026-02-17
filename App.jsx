@@ -260,7 +260,51 @@ export default function App() {
     return { time: fmtTime(dt), date: fD(dt), price, volume: Number(r.volume || 0), vwap: price };
   }).filter(r => Number.isFinite(r.price) && r.price > 0);
 
-  /** Load all 5 timeframes of chart data for a single category — fetched in parallel */
+  /** Compute ATR from raw OHLCV points (same algorithm as backend) */
+  const computeATRFromPoints = (points, period = 14) => {
+    if (!points || points.length < 2) return 0;
+    const trs = [];
+    for (let i = 1; i < points.length; i++) {
+      const h = points[i].high, l = points[i].low, pc = points[i - 1].close;
+      if (!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc)) continue;
+      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    if (trs.length === 0) return 0;
+    const used = trs.slice(-Math.min(period, trs.length));
+    return used.reduce((a, b) => a + b, 0) / used.length;
+  };
+
+  /** Compute live metrics from chart OHLCV data so displayed stats always match the chart */
+  const computeChartMetrics = (points, metaPrice) => {
+    if (!points || points.length < 2) return null;
+    const latest = points[points.length - 1];
+    const prev = points[points.length - 2];
+    const price = Number.isFinite(metaPrice) && metaPrice > 0 ? metaPrice : Number(latest.close);
+    if (!Number.isFinite(price) || price <= 0) return null;
+
+    // ATR%
+    const atr = computeATRFromPoints(points);
+    const atr_pct = price > 0 ? +((atr / price) * 100).toFixed(1) : 0;
+
+    // Relative volume (today's volume vs average of prior days)
+    const volumes = points.map(p => p.volume).filter(Number.isFinite);
+    const avgVol = volumes.length > 1 ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1) : 1;
+    const todayVol = latest.volume ?? 0;
+    const relative_volume = avgVol > 0 ? +(todayVol / avgVol).toFixed(1) : 1;
+
+    // Gap %
+    const prevClose = Number(prev?.close ?? price);
+    const todayOpen = Number(latest.open ?? price);
+    const gap_pct = prevClose > 0 ? +(((todayOpen - prevClose) / prevClose) * 100).toFixed(1) : 0;
+
+    // Formatted avg volume
+    const fmtV = (val) => val >= 1e6 ? `${(val / 1e6).toFixed(1)}M` : val >= 1e3 ? `${(val / 1e3).toFixed(0)}K` : String(Math.round(val));
+    const avg_volume = fmtV(avgVol);
+
+    return { atr_pct, relative_volume, gap_pct, avg_volume };
+  };
+
+  /** Load all 5 timeframes of chart data for a single category + fetch fresh quote — all in parallel */
   const loadChartsForCategory = async (id, ticker, bp, v) => {
     try {
       const tfs = ["1D", "5D", "1M", "6M", "1Y"];
@@ -268,14 +312,22 @@ export default function App() {
       let price = null;
       let prevClose = null;
       let lastTs = null;
-      // Fetch all timeframes in parallel instead of sequentially
-      const mkResults = await Promise.allSettled(tfs.map(t => fetchMarket(ticker, t)));
+      let monthlyPoints = null; // raw OHLCV from the 1M chart for metric computation
+      // Fetch all timeframes + a fresh quote in parallel
+      const [quoteResult, ...mkResults] = await Promise.allSettled([
+        fetchQuote(ticker),
+        ...tfs.map(t => fetchMarket(ticker, t)),
+      ]);
+      const freshQuote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+
       for (let i = 0; i < tfs.length; i++) {
         const t = tfs[i];
         if (mkResults[i].status !== 'fulfilled') { out[t] = []; continue; }
         const mk = mkResults[i].value;
         const pts = toChartPoints(mk.points);
         out[t] = pts;
+        // Save raw 1M points for metric computation
+        if (t === "1M" && mk.points?.length) monthlyPoints = mk.points;
         if (t === "1D" || !price) {
           // Prefer regularMarketPrice from meta (most current), then last chart point
           const last = mk.points?.[mk.points.length - 1];
@@ -289,10 +341,42 @@ export default function App() {
       const isStale = lastTs ? (Date.now() - lastTs) > 48 * 60 * 60 * 1000 : true;
       const hasData = Object.values(out).some(pts => pts.length > 0);
       const status = hasData ? (isStale ? "delayed" : "live") : "offline";
+
+      // Build price update with all live metrics computed from chart data
       let priceUpdate = null;
       if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) {
         priceUpdate = { price: +price.toFixed(2), change_pct: +(((price - prevClose) / prevClose) * 100).toFixed(2) };
       }
+
+      // Compute live metrics from monthly chart data (ATR%, relative volume, gap%)
+      const chartMetrics = computeChartMetrics(monthlyPoints, price);
+      if (chartMetrics && priceUpdate) {
+        priceUpdate.atr_pct = chartMetrics.atr_pct;
+        priceUpdate.gap_pct = chartMetrics.gap_pct;
+        // Use chart-computed avg_volume as fallback
+        if (!priceUpdate.avg_volume) priceUpdate.avg_volume = chartMetrics.avg_volume;
+
+        // Relative volume: prefer Yahoo's 3-month avg if available (more accurate), else use chart-based
+        const rawAvg3m = freshQuote?._raw_avg_volume_3m;
+        const rawTodayVol = freshQuote?._raw_market_volume;
+        if (Number.isFinite(rawAvg3m) && rawAvg3m > 0 && Number.isFinite(rawTodayVol)) {
+          priceUpdate.relative_volume = +(rawTodayVol / rawAvg3m).toFixed(1);
+        } else {
+          priceUpdate.relative_volume = chartMetrics.relative_volume;
+        }
+      }
+
+      // Merge fresh quote data (market_cap, float, short interest, etc.)
+      if (freshQuote && priceUpdate) {
+        if (isValidMetricValue(freshQuote.market_cap)) priceUpdate.market_cap = freshQuote.market_cap;
+        if (isValidMetricValue(freshQuote.avg_volume)) priceUpdate.avg_volume = freshQuote.avg_volume;
+        if (isValidMetricValue(freshQuote.float_val)) priceUpdate.float_val = freshQuote.float_val;
+        if (isValidMetricValue(freshQuote.short_interest)) priceUpdate.short_interest = freshQuote.short_interest;
+        if (isValidMetricValue(freshQuote.premarket_vol)) priceUpdate.premarket_vol = freshQuote.premarket_vol;
+        if (freshQuote.company) priceUpdate.company = freshQuote.company;
+        if (freshQuote.exchange) priceUpdate.exchange = freshQuote.exchange;
+      }
+
       return { charts: out, status, priceUpdate };
     } catch {
       return {
@@ -432,21 +516,20 @@ export default function App() {
       progress(`${pick.ticker} quote loaded`);
     }));
 
-    // Double-check: validate all metric fields in each pick, falling back to static data for any invalid values
+    // Double-check: validate all metric fields — use "N/A" for missing data, never borrow from static picks of a different ticker
     for (const id of catIds) {
       const ep = enrichedPicks[id];
-      const sp = STATIC_PICKS[id];
       if (!ep) continue;
       // Ensure string metric fields are valid short numeric values, not description text
       for (const field of ['market_cap', 'avg_volume', 'float_val', 'short_interest', 'premarket_vol']) {
         if (!isValidMetricValue(ep[field])) {
-          ep[field] = sp?.[field] || 'N/A';
+          ep[field] = 'N/A';
         }
       }
       // Ensure numeric metric fields are actual finite numbers
       for (const field of ['relative_volume', 'atr_pct', 'gap_pct']) {
         if (!Number.isFinite(ep[field])) {
-          ep[field] = sp?.[field] ?? 0;
+          ep[field] = 0;
         }
       }
       enrichedPicks[id] = ep;
@@ -466,7 +549,7 @@ export default function App() {
       const result = await loadChartsForCategory(id, ticker, bp, v);
       allCharts[id] = result.charts;
       allStatus[id] = result.status;
-      // Always use chart's price/change_pct so displayed values match the live chart
+      // Override with live chart-computed metrics + fresh quote data so displayed values match actual data
       if (result.priceUpdate && Number.isFinite(result.priceUpdate.price) && result.priceUpdate.price > 0) {
         enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
       }
