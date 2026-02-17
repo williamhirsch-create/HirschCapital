@@ -173,6 +173,16 @@ CATS.forEach(c => {
 
 const getETDate = () => { try { return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }); } catch { return ymd(new Date()); } };
 
+/** Validate that a metric value looks like a short formatted number (e.g. "1.3B", "32.4M", "14.8%", "520K", "N/A") and not description text */
+const isValidMetricValue = (v) => {
+  if (v == null || v === '') return false;
+  const s = String(v).trim();
+  if (s === 'N/A') return true;
+  // Must be short (under 20 chars) and match numeric patterns like "1.3B", "32.4M", "$520K", "14.8%", "2.1x"
+  if (s.length > 20) return false;
+  return /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(s);
+};
+
 const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", interval: "30m" }, "1M": { range: "1mo", interval: "1d" }, "6M": { range: "6mo", interval: "1d" }, "1Y": { range: "1y", interval: "1d" }};
 const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
@@ -350,7 +360,8 @@ export default function App() {
     } catch { return null; }
   };
 
-  /** Enrich a pick with live data from Yahoo quote + Google Finance — always refreshes ALL fields */
+  /** Enrich a pick with live data from Yahoo quote + Google Finance — always refreshes ALL fields.
+   *  Validates that metric values are proper short formatted numbers before accepting them. */
   const enrichPickWithQuote = async (pick) => {
     if (!pick?.ticker || pick.ticker === "N/A") return pick;
     // Fetch from both Yahoo quote and Google Finance in parallel
@@ -369,18 +380,18 @@ export default function App() {
       enriched.change_pct = q.change_pct ?? enriched.change_pct;
     }
 
-    // Market cap: prefer Google Finance, fall back to Yahoo
-    if (gf?.market_cap) enriched.market_cap = gf.market_cap;
-    else if (q?.market_cap) enriched.market_cap = q.market_cap;
+    // Market cap: prefer Google Finance, fall back to Yahoo — only accept valid short numeric strings
+    if (isValidMetricValue(gf?.market_cap)) enriched.market_cap = gf.market_cap;
+    else if (isValidMetricValue(q?.market_cap)) enriched.market_cap = q.market_cap;
 
-    // Avg volume: prefer Google Finance, fall back to Yahoo
-    if (gf?.avg_volume) enriched.avg_volume = gf.avg_volume;
-    else if (q?.avg_volume) enriched.avg_volume = q.avg_volume;
+    // Avg volume: prefer Google Finance, fall back to Yahoo — only accept valid short numeric strings
+    if (isValidMetricValue(gf?.avg_volume)) enriched.avg_volume = gf.avg_volume;
+    else if (isValidMetricValue(q?.avg_volume)) enriched.avg_volume = q.avg_volume;
 
-    // Always update remaining fields from Yahoo (Google doesn't provide these)
-    if (q?.float_val) enriched.float_val = q.float_val;
-    if (q?.short_interest) enriched.short_interest = q.short_interest;
-    if (q?.premarket_vol) enriched.premarket_vol = q.premarket_vol;
+    // Always update remaining fields from Yahoo (Google doesn't provide these) — with validation
+    if (isValidMetricValue(q?.float_val)) enriched.float_val = q.float_val;
+    if (isValidMetricValue(q?.short_interest)) enriched.short_interest = q.short_interest;
+    if (isValidMetricValue(q?.premarket_vol)) enriched.premarket_vol = q.premarket_vol;
     if (q?.exchange) enriched.exchange = q.exchange;
     if (q?.company) enriched.company = q.company;
 
@@ -420,6 +431,26 @@ export default function App() {
       enrichedPicks[id] = pick;
       progress(`${pick.ticker} quote loaded`);
     }));
+
+    // Double-check: validate all metric fields in each pick, falling back to static data for any invalid values
+    for (const id of catIds) {
+      const ep = enrichedPicks[id];
+      const sp = STATIC_PICKS[id];
+      if (!ep) continue;
+      // Ensure string metric fields are valid short numeric values, not description text
+      for (const field of ['market_cap', 'avg_volume', 'float_val', 'short_interest', 'premarket_vol']) {
+        if (!isValidMetricValue(ep[field])) {
+          ep[field] = sp?.[field] || 'N/A';
+        }
+      }
+      // Ensure numeric metric fields are actual finite numbers
+      for (const field of ['relative_volume', 'atr_pct', 'gap_pct']) {
+        if (!Number.isFinite(ep[field])) {
+          ep[field] = sp?.[field] ?? 0;
+        }
+      }
+      enrichedPicks[id] = ep;
+    }
 
     // Set all picks at once so the UI can start rendering what we have
     setP({ ...enrichedPicks });
@@ -615,9 +646,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* METRICS */}
+      {/* METRICS — each value is validated as a short numeric string; long text / descriptions are replaced with "N/A" */}
       <div className="afu d2 mg" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:18}}>
-        {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:`${pk.relative_volume}x`},{l:"14D ATR%",v:pk.atr_pct+"%"},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:`+${pk.gap_pct}%`},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div><div className="fs" style={{fontSize:17,fontWeight:700}}>{m.v}</div></div>))}
+        {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div><div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div></div>);})}
       </div>
 
       {/* HIRSCH SCORE */}
