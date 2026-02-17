@@ -1,24 +1,56 @@
+const YF_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/** Fetch from Yahoo Finance with automatic host fallback (query1 → query2) */
+const yfFetch = async (path, params) => {
+  const qs = new URLSearchParams(params).toString();
+  let lastErr = null;
+  for (const host of YF_HOSTS) {
+    try {
+      const url = `https://${host}${path}?${qs}`;
+      const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
+      if (r.ok) return r;
+      lastErr = new Error(`HTTP ${r.status} from ${host}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('All Yahoo Finance hosts failed');
+};
+
 export const fetchChart = async (symbol, range = '5d', interval = '1d') => {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&includePrePost=true&events=div%2Csplits`;
-  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 HirschCapital/1.0' } });
-  if (!r.ok) return null;
-  const raw = await r.json();
-  const result = raw?.chart?.result?.[0];
-  if (!result) return null;
-  const ts = result.timestamp || [];
-  const q = result.indicators?.quote?.[0] || {};
-  return {
-    meta: result.meta || {},
-    points: ts.map((t, i) => ({ ts: t, open: q.open?.[i], high: q.high?.[i], low: q.low?.[i], close: q.close?.[i], volume: q.volume?.[i] })).filter(p => Number.isFinite(p.ts) && Number.isFinite(p.close)),
-  };
+  try {
+    const r = await yfFetch(`/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+      range, interval, includePrePost: 'true', events: 'div,splits',
+    });
+    const raw = await r.json();
+    const result = raw?.chart?.result?.[0];
+    if (!result) return null;
+    const ts = result.timestamp || [];
+    const q = result.indicators?.quote?.[0] || {};
+    return {
+      meta: result.meta || {},
+      points: ts.map((t, i) => ({
+        ts: t,
+        open: q.open?.[i],
+        high: q.high?.[i],
+        low: q.low?.[i],
+        close: q.close?.[i],
+        volume: q.volume?.[i],
+      })).filter(p => Number.isFinite(p.ts) && Number.isFinite(p.close)),
+    };
+  } catch {
+    return null;
+  }
 };
 
 /** Fetch batch quotes from Yahoo Finance v7 endpoint. Returns array of quote objects or null on failure. */
 export const fetchQuotes = async (symbols) => {
   try {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.map(s => encodeURIComponent(s)).join(',')}`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 HirschCapital/1.0' } });
-    if (!r.ok) return null;
+    const r = await yfFetch('/v7/finance/quote', {
+      symbols: symbols.join(','),
+      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+    });
     const raw = await r.json();
     return raw?.quoteResponse?.result || null;
   } catch { return null; }

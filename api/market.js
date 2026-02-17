@@ -1,5 +1,7 @@
 const DEFAULT_RANGE = '1mo';
 const DEFAULT_INTERVAL = '1d';
+const YF_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default async function handler(req, res) {
   try {
@@ -11,10 +13,25 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing symbol query parameter.' });
     }
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&includePrePost=true&events=div%2Csplits`;
-    const upstream = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 HirschCapital/1.0' } });
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: `Upstream market API failed (${upstream.status}).` });
+    const qs = new URLSearchParams({
+      range, interval, includePrePost: 'true', events: 'div,splits',
+    }).toString();
+
+    let upstream = null;
+    let lastStatus = 502;
+    for (const host of YF_HOSTS) {
+      try {
+        const r = await fetch(
+          `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?${qs}`,
+          { headers: { 'User-Agent': UA, 'Accept': 'application/json' } },
+        );
+        if (r.ok) { upstream = r; break; }
+        lastStatus = r.status;
+      } catch { /* try next host */ }
+    }
+
+    if (!upstream) {
+      return res.status(lastStatus).json({ error: `Upstream market API failed (${lastStatus}).` });
     }
 
     const raw = await upstream.json();
