@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef } from "react";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Bar, CartesianGrid, Line } from "recharts";
 
 const CATS = [
   { id: "penny", label: "Penny Stocks", short: "Penny", color: "#FF4757", range: "$0.10-$5", crit: "Price < $5, micro-cap", icon: "⚡" },
@@ -70,15 +71,6 @@ const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", inte
 const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
-const pctRet = (entry, value) => (Number(entry)>0 ? ((Number(value)-Number(entry))/Number(entry))*100 : 0);
-const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
-const PG_PATH = { home: "/", pick: "/pick", track: "/track", method: "/method", about: "/about" };
-const PATH_PG = Object.fromEntries(Object.entries(PG_PATH).map(([k,v])=>[v,k]));
-const pageFromPath = () => {
-  if (typeof window === "undefined") return "home";
-  const p = window.location.pathname.replace(/\/$/, "") || "/";
-  return PATH_PG[p] || "home";
-};
 
 const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
 :root{--bg:#FAFAF8;--cd:#FFF;--dk:#0C0F14;--tx:#1A1D23;--mu:#6B7280;--ac:#0066FF;--al:#E8F0FE;--gn:#00C48C;--gl:#E6FAF3;--rd:#FF4757;--rl:#FFF0F1;--am:#F59E0B;--aml:#FEF3C7;--bd:#E8E8E4}
@@ -111,19 +103,7 @@ export default function App() {
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
 
-  useEffect(() => {
-    const onPop = () => setPg(pageFromPath());
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-
-  useEffect(() => {
-    const next = PG_PATH[pg] || "/";
-    if (window.location.pathname !== next) window.history.replaceState(null, "", next);
-  }, [pg]);
-
   const [trackLive, setTrackLive] = useState({});
-  const trackLoading = useRef({});
 
   const fetchMarket = async (ticker, tf = "1M") => {
     const cfg = TF_CFG[tf] || TF_CFG["1M"];
@@ -167,59 +147,51 @@ export default function App() {
   };
 
   const loadTrackLive = async (id) => {
-    if (trackLive[id] || trackLoading.current[id]) return;
-    trackLoading.current[id] = true;
+    if (trackLive[id]) return;
+    const rows = HIST_MKT[id] || [];
     try {
-      const rs = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=120`);
-      if (!rs.ok) throw new Error(`Track fetch failed: ${rs.status}`);
-      const payload = await rs.json();
-      const rows = (payload.rows || []).map((r) => ({
-        d: r.date,
-        t: r.ticker,
-        e: Number(r.reference_price || 0),
-        c: Number(r.close || 0),
-        h: Number(r.high || 0),
-        l: Number(r.low || 0),
-        s: Number(r.score || 0),
-        category: r.category,
+      const openDays = mktKeySet(140);
+      const updated = await Promise.all(rows.map(async (row, idx) => {
+        const mk = await fetch(`/api/market?symbol=${encodeURIComponent(row.t)}&range=6mo&interval=1d`).then(r => r.ok ? r.json() : null);
+        const daily = (mk?.points || []).filter(pt => openDays.has(ymd(new Date(pt.ts * 1000))));
+        const pick = daily[Math.max(0, daily.length - 1 - idx)] || daily[daily.length - 1];
+        if (!pick) return row;
+        const dt = new Date(pick.ts * 1000);
+        return { ...row, d: fD(dt), e: +Number(pick.open ?? pick.close).toFixed(2), c: +Number(pick.close).toFixed(2), h: +Number(pick.high ?? pick.close).toFixed(2), l: +Number(pick.low ?? pick.close).toFixed(2) };
       }));
-      setTrackLive((p) => ({ ...p, [id]: rows }));
+      setTrackLive(p => ({ ...p, [id]: updated }));
     } catch {
-      setTrackLive((p) => ({ ...p, [id]: HIST_MKT[id] || [] }));
-    } finally {
-      trackLoading.current[id] = false;
+      setTrackLive(p => ({ ...p, [id]: rows }));
     }
   };
 
-  const refreshToday = async () => {
-    setLd(ac);
+  const gen = async (id) => {
+    if (picks[id]) return; setLd(id);
+    const cat = CATS.find(c => c.id === id);
+    const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
+    const v = id==="penny"?.05:id==="small"?.035:.02;
+    let base = FB[id];
     try {
-      const rs = await fetch('/api/today');
-      if (!rs.ok) throw new Error(`Today fetch failed: ${rs.status}`);
-      const data = await rs.json();
-      const byCategory = data?.picks || {};
-      setP(byCategory);
-      for (const [id, pick] of Object.entries(byCategory)) {
-        const bp = Number(pick.price || 1);
-        const v = id === "penny" ? .05 : id === "small" ? .035 : .02;
-        loadLiveCharts(id, pick.ticker, bp, v);
-      }
-    } catch {
-      setP(FB);
-    } finally {
-      setLd(null);
-    }
+      const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user",
+          content: `You are the Hirsch Capital quant algorithm. Today: ${LIVE_DAY.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}. Generate today's ${cat.label} pick (${cat.crit}, ${cat.range}). Signals: ${SIGS[id].join(", ")}. Return ONLY JSON (no markdown): {"ticker":"XXXX","company":"Name","exchange":"NASDAQ","price":${bp.toFixed(2)},"change_pct":5.2,"market_cap":"45M","avg_volume":"12M","relative_volume":3.2,"atr_pct":8.5,"float_val":"22M","short_interest":"14%","gap_pct":4.2,"premarket_vol":"2.1M","hirsch_score":84,"thesis_summary":"b1|b2|b3|b4","catalysts":"P1\\n\\nP2","upside_drivers":"Detail","key_levels":"Levels","risks":"r1|r2|r3","invalidation":"t1|t2|t3","signal_values":"v1|v2|v3|v4|v5|v6|v7","signal_weights":"w1|w2|w3|w4|w5|w6|w7","signal_reasons":"r1|r2|r3|r4|r5|r6|r7","what_it_is":"Desc"} Pick a real stock. Sophisticated quant analysis. Probabilistic language. Weights sum to 100.`
+        }]})
+      });
+      const d = await r.json(); const t = d.content?.map(i=>i.text||"").join("\n")||"";
+      base = JSON.parse(t.replace(/```json|```/g,"").trim());
+    } catch {}
+    setP(p => ({...p,[id]:base}));
+    await loadLiveCharts(id, base.ticker || FB[id].ticker, bp, v);
+    await loadTrackLive(id);
+    setLd(null);
+    loadTrackLive(id);
   };
 
-  useEffect(() => { refreshToday(); }, []);
-  useEffect(() => { if (pg === "track") loadTrackLive(ac); }, [ac, pg]);
-  useEffect(() => {
-    const i = setInterval(() => refreshToday(), 60 * 1000);
-    return () => clearInterval(i);
-  }, []);
+  useEffect(() => { gen("penny"); }, []);
+  useEffect(() => { gen(ac); loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
+  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
 
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
@@ -356,9 +328,9 @@ export default function App() {
 
   // TRACK RECORD
   const Track = () => {
-    const h=trackLive[ac]||HIST_MKT[ac]||[];const w=h.filter(p=>pctRet(p.e,p.c)>0).length;
-    const ar=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.c),0)/h.length).toFixed(1):"0";
-    const mr2=h.length?(h.reduce((a,p)=>a+pctRet(p.e,p.h),0)/h.length).toFixed(1):"0";
+    const h=HIST_MKT[ac]||[];const w=h.filter(p=>p.c>p.e).length;
+    const ar=h.length?(h.reduce((a,p)=>a+((p.c-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
+    const mr2=h.length?(h.reduce((a,p)=>a+((p.h-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
       <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses.</p>
