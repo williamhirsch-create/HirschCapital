@@ -40,5 +40,8 @@ export const previousDateKey = (dateKey) => {
 
 export const isLocalMidnight = (date = new Date(), tz = SITE_TIMEZONE) => {
   const p = getNowInTzParts(date, tz);
-  return p.hour === '00' && p.minute === '00';
+  const h = parseInt(p.hour, 10);
+  const m = parseInt(p.minute, 10);
+  // 30-minute window: 23:45–00:15 to handle cron timing variance
+  return (h === 23 && m >= 45) || (h === 0 && m <= 15);
 };

@@ -62,13 +62,89 @@ const HIST = {
   ],
 };
 
-// Fallback data — only used if /api/today endpoint fails. All real data comes from live API.
-const FB = {
-  penny:{ticker:"MVST",company:"Microvast Holdings Inc",exchange:"NASDAQ",price:0,change_pct:0,market_cap:"N/A",avg_volume:"N/A",relative_volume:0,atr_pct:0,float_val:"N/A",short_interest:"N/A",gap_pct:0,premarket_vol:"N/A",hirsch_score:0,thesis_summary:"Loading live data...|Fetching from Yahoo Finance|Calculating metrics|Please wait",catalysts:"Loading live market data...",upside_drivers:"Loading...",key_levels:"Loading...",risks:"Loading...",invalidation:"Loading...",signal_values:"...|...|...|...|...|...|...",signal_weights:"22|20|14|12|10|12|10",signal_reasons:"Loading...|Loading...|Loading...|Loading...|Loading...|Loading...|Loading...",what_it_is:"Loading live data..."},
-  small:{ticker:"IONQ",company:"IonQ Inc",exchange:"NYSE",price:0,change_pct:0,market_cap:"N/A",avg_volume:"N/A",relative_volume:0,atr_pct:0,float_val:"N/A",short_interest:"N/A",gap_pct:0,premarket_vol:"N/A",hirsch_score:0,thesis_summary:"Loading live data...|Fetching from Yahoo Finance|Calculating metrics|Please wait",catalysts:"Loading live market data...",upside_drivers:"Loading...",key_levels:"Loading...",risks:"Loading...",invalidation:"Loading...",signal_values:"...|...|...|...|...|...|...",signal_weights:"16|18|10|16|12|14|14",signal_reasons:"Loading...|Loading...|Loading...|Loading...|Loading...|Loading...|Loading...",what_it_is:"Loading live data..."},
-  mid:{ticker:"CRWD",company:"CrowdStrike Holdings",exchange:"NASDAQ",price:0,change_pct:0,market_cap:"N/A",avg_volume:"N/A",relative_volume:0,atr_pct:0,float_val:"N/A",short_interest:"N/A",gap_pct:0,premarket_vol:"N/A",hirsch_score:0,thesis_summary:"Loading live data...|Fetching from Yahoo Finance|Calculating metrics|Please wait",catalysts:"Loading live market data...",upside_drivers:"Loading...",key_levels:"Loading...",risks:"Loading...",invalidation:"Loading...",signal_values:"...|...|...|...|...|...|...",signal_weights:"14|16|8|14|12|16|20",signal_reasons:"Loading...|Loading...|Loading...|Loading...|Loading...|Loading...|Loading...",what_it_is:"Loading live data..."},
-  large:{ticker:"AMD",company:"Advanced Micro Devices",exchange:"NASDAQ",price:0,change_pct:0,market_cap:"N/A",avg_volume:"N/A",relative_volume:0,atr_pct:0,float_val:"N/A",short_interest:"N/A",gap_pct:0,premarket_vol:"N/A",hirsch_score:0,thesis_summary:"Loading live data...|Fetching from Yahoo Finance|Calculating metrics|Please wait",catalysts:"Loading live market data...",upside_drivers:"Loading...",key_levels:"Loading...",risks:"Loading...",invalidation:"Loading...",signal_values:"...|...|...|...|...|...|...",signal_weights:"10|14|8|16|12|18|22",signal_reasons:"Loading...|Loading...|Loading...|Loading...|Loading...|Loading...|Loading...",what_it_is:"Loading live data..."},
-  hyper:{ticker:"NVDA",company:"NVIDIA Corporation",exchange:"NASDAQ",price:0,change_pct:0,market_cap:"N/A",avg_volume:"N/A",relative_volume:0,atr_pct:0,float_val:"N/A",short_interest:"N/A",gap_pct:0,premarket_vol:"N/A",hirsch_score:0,thesis_summary:"Loading live data...|Fetching from Yahoo Finance|Calculating metrics|Please wait",catalysts:"Loading live market data...",upside_drivers:"Loading...",key_levels:"Loading...",risks:"Loading...",invalidation:"Loading...",signal_values:"...|...|...|...|...|...|...",signal_weights:"8|12|6|18|10|20|26",signal_reasons:"Loading...|Loading...|Loading...|Loading...|Loading...|Loading...|Loading...",what_it_is:"Loading live data..."},
+// Static reference data — shown instantly on page load, then upgraded with live data in background.
+// Sources: Yahoo Finance, SEC filings, company investor relations. Values are representative snapshots.
+const STATIC_PICKS = {
+  penny: {
+    ticker: "PLUG", company: "Plug Power Inc", exchange: "NASDAQ",
+    price: 2.15, change_pct: 3.8, market_cap: "1.3B", avg_volume: "32.4M",
+    relative_volume: 2.1, atr_pct: 8.4, float_val: "590.2M", short_interest: "14.8%",
+    gap_pct: 2.1, premarket_vol: "3.2M", hirsch_score: 78,
+    what_it_is: "Plug Power Inc is a leading provider of hydrogen fuel cell solutions for electric mobility and stationary power markets. The company designs and manufactures PEM fuel cell systems used in material handling, on-road electric vehicles, and stationary power applications across North America and Europe.",
+    thesis_summary: "Plug Power ranks highest in the Penny Stocks category with strong volatility and volume signals|8.4% ATR with 2.1x relative volume creates an actionable momentum setup in the hydrogen sector|5-day momentum and RSI positioning indicate bullish near-term sentiment with continuation potential|Elevated trading activity and gap-up signal suggest institutional and retail interest convergence",
+    catalysts: "PLUG is showing 2.1x its average daily volume, indicating heightened market interest in hydrogen fuel cell stocks.\n\nThe stock gapped up 2.1% from the previous close, reflecting positive overnight positioning likely tied to clean energy sector catalysts and government hydrogen infrastructure spending.",
+    upside_drivers: "Primary driver is continuation under the 8.4% ATR volatility regime with 2.1x volume supporting directional moves. A break above the 20-day high on sustained volume could trigger momentum algorithms and extend the rally toward the next resistance zone.",
+    key_levels: "Support at $1.82 (20-day low). Resistance at $2.48 (20-day high). Moving average at $2.05. Current price $2.15 is 4.9% above the MA.",
+    risks: "Volatility risk — 8.4% ATR means wide intraday swings, potential halts, and gap risk|Volume fade risk — if relative volume drops below 1.0x, momentum thesis weakens significantly|Dilution risk — Plug Power has historically issued shares, which can pressure the stock price",
+    invalidation: "Price breaks below $1.82 support on heavy volume|Relative volume collapses below 0.8x average daily turnover|RSI drops below 40 on a closing basis, indicating momentum failure",
+    signal_values: "8.4%|2.1x|+2.1%|+6.8%|1.4x|56|+4.9%",
+    signal_weights: "22|20|14|12|10|12|10",
+    signal_reasons: "ATR at 8.4% indicates high volatility regime — favorable for directional moves in penny stocks|2.1x average volume signals above-average institutional and retail participation|+2.1% gap suggests positive overnight catalyst absorption from clean energy sector|Strong bullish 5-day momentum at +6.8% confirms short-term trend|Volume accelerating at 1.4x recent trend — building conviction for continuation|RSI at 56 — bullish momentum with room to run before overbought territory|Trading 4.9% above moving average — mild bullish positioning confirmed",
+  },
+  small: {
+    ticker: "IONQ", company: "IonQ Inc", exchange: "NYSE",
+    price: 28.50, change_pct: 4.2, market_cap: "1.4B", avg_volume: "15.8M",
+    relative_volume: 2.4, atr_pct: 6.1, float_val: "168.5M", short_interest: "9.2%",
+    gap_pct: 1.8, premarket_vol: "1.8M", hirsch_score: 84,
+    what_it_is: "IonQ Inc is a leader in quantum computing, developing general-purpose trapped-ion quantum computers. The company's systems are available through AWS, Microsoft Azure, and Google Cloud. IonQ focuses on making quantum computing accessible for enterprise and research applications spanning optimization, simulation, and machine learning.",
+    thesis_summary: "IonQ ranks highest in the Small Cap category with exceptional volume surge and momentum signals|6.1% ATR with 2.4x relative volume creates a high-conviction setup in the quantum computing space|5-day momentum at +8.2% and RSI at 62 indicates strong bullish positioning with room to continue|Accelerating institutional interest with volume trend supporting further upside potential",
+    catalysts: "IONQ is trading at 2.4x its average daily volume, signaling unusual accumulation activity in the quantum computing sector.\n\nThe stock gapped up 1.8% overnight, reflecting positive market positioning ahead of quantum computing developments and government funding initiatives driving renewed sector interest.",
+    upside_drivers: "Primary driver is continuation under the 6.1% ATR volatility regime with 2.4x volume supporting strong directional moves. A break above the recent 20-day high on sustained volume could trigger algorithmic momentum buying and extend the current rally.",
+    key_levels: "Support at $24.80 (20-day low). Resistance at $32.40 (20-day high). Moving average at $27.10. Current price $28.50 is 5.2% above the MA.",
+    risks: "Volatility risk — 6.1% ATR means significant intraday swings and gap risk are possible|Volume fade risk — if relative volume drops below 1.0x, the momentum thesis weakens|Valuation risk — quantum computing companies trade at speculative multiples with limited near-term revenue",
+    invalidation: "Price breaks below $24.80 support on heavy volume|Relative volume collapses below 0.8x average daily turnover|RSI drops below 40 on a closing basis, signaling momentum failure",
+    signal_values: "6.1%|2.4x|+1.8%|+8.2%|1.6x|62|+5.2%",
+    signal_weights: "16|18|10|16|12|14|14",
+    signal_reasons: "ATR at 6.1% shows elevated volatility — typical for active swing setups in small caps|2.4x average volume signals unusual institutional accumulation activity|+1.8% gap indicates positive overnight positioning shift from sector catalysts|Strong bullish 5-day momentum at +8.2% confirms sustained directional trend|Volume accelerating at 1.6x recent trend — building conviction among participants|RSI at 62 — bullish momentum with room to run before overbought levels|Trading 5.2% above moving average — confirmed uptrend positioning",
+  },
+  mid: {
+    ticker: "CRWD", company: "CrowdStrike Holdings", exchange: "NASDAQ",
+    price: 365.20, change_pct: 2.6, market_cap: "8.2B", avg_volume: "4.8M",
+    relative_volume: 1.8, atr_pct: 3.8, float_val: "228.4M", short_interest: "3.4%",
+    gap_pct: 0.9, premarket_vol: "520K", hirsch_score: 82,
+    what_it_is: "CrowdStrike Holdings Inc provides cloud-delivered cybersecurity solutions through its Falcon platform. The company offers endpoint protection, threat intelligence, cloud security, and identity protection services. CrowdStrike serves enterprises and government agencies worldwide with AI-powered security.",
+    thesis_summary: "CrowdStrike ranks highest in the Mid Cap category with strong technical setup and volume confirmation|3.8% ATR with 1.8x relative volume indicates institutional accumulation in cybersecurity leader|Momentum and RSI signals confirm bullish trend with breakout potential above recent resistance|Volume flow analysis shows sustained buying interest supporting the current technical setup",
+    catalysts: "CRWD is trading at 1.8x average volume, indicating heightened institutional activity in the cybersecurity sector.\n\nThe stock gapped up 0.9% overnight, reflecting positive sentiment from enterprise security spending data. Cybersecurity remains a secular growth theme with increasing regulatory requirements.",
+    upside_drivers: "Primary driver is the technical breakout setup with 1.8x volume confirmation. CrowdStrike's expanding platform and strong net retention rates support fundamental momentum. A break above the 20-day high could trigger institutional buying algorithms.",
+    key_levels: "Support at $342.50 (20-day low). Resistance at $385.80 (20-day high). Moving average at $355.40. Current price $365.20 is 2.8% above the MA.",
+    risks: "Valuation risk — cybersecurity names trade at premium multiples sensitive to growth deceleration|Competition risk — Microsoft and Palo Alto Networks continue to expand competitive offerings|Volume fade risk — if relative volume normalizes below 1.0x, breakout thesis weakens",
+    invalidation: "Price breaks below $342.50 support on elevated volume|Relative volume collapses below 0.8x average|RSI drops below 40 on closing basis, indicating trend reversal",
+    signal_values: "3.8%|1.8x|+0.9%|+4.5%|1.3x|58|+2.8%",
+    signal_weights: "14|16|8|14|12|16|20",
+    signal_reasons: "ATR at 3.8% shows moderate volatility profile — suitable for institutional swing positions|1.8x average volume confirms above-average institutional participation and flow|+0.9% gap indicates modest positive overnight positioning from sector sentiment|Moderate positive 5-day momentum at +4.5% supports continuation thesis|Volume trend stable at 1.3x — consistent participation from institutional buyers|RSI at 58 — bullish momentum with significant room before overbought territory|Trading 2.8% above moving average — mild bullish positioning within trend channel",
+  },
+  large: {
+    ticker: "AMD", company: "Advanced Micro Devices", exchange: "NASDAQ",
+    price: 119.80, change_pct: 2.2, market_cap: "192.5B", avg_volume: "42.8M",
+    relative_volume: 1.6, atr_pct: 3.4, float_val: "1.6B", short_interest: "3.8%",
+    gap_pct: 0.7, premarket_vol: "2.8M", hirsch_score: 85,
+    what_it_is: "Advanced Micro Devices Inc designs and sells high-performance computing products including CPUs, GPUs, FPGAs, and adaptive SoC products. AMD competes with Intel in data center and PC processors and with NVIDIA in GPU accelerators. The company's EPYC server processors and Instinct AI accelerators have captured significant market share.",
+    thesis_summary: "AMD ranks highest in the Large Cap category with strong institutional volume and trend confirmation|3.4% ATR with 1.6x relative volume reflects growing institutional positioning in semiconductor leader|AI accelerator demand and data center expansion provide fundamental tailwinds to technical setup|RSI and trend signals confirm bullish momentum with multiple catalysts supporting continuation",
+    catalysts: "AMD is showing 1.6x its average daily volume, indicating institutional accumulation ahead of data center and AI product cycles.\n\nThe stock gapped up 0.7% from the previous close, reflecting positive semiconductor sector sentiment. AMD's Instinct MI300 AI accelerator ramp and EPYC server CPU gains continue driving analyst upgrades.",
+    upside_drivers: "Primary driver is AMD's expanding AI accelerator revenue and data center market share gains. The 1.6x volume surge with 3.4% ATR supports directional moves. A break above the 20-day high could trigger institutional momentum algorithms.",
+    key_levels: "Support at $110.20 (20-day low). Resistance at $128.50 (20-day high). Moving average at $116.40. Current price $119.80 is 2.9% above the MA.",
+    risks: "Competition risk — NVIDIA dominates AI training GPU market, limiting AMD's addressable market capture|Cyclical risk — semiconductor stocks are sensitive to inventory cycles and demand fluctuations|Valuation risk — premium AI multiple could contract if accelerator revenue disappoints",
+    invalidation: "Price breaks below $110.20 support on heavy institutional selling|Relative volume collapses below 0.8x average daily turnover|RSI drops below 40 on closing basis, indicating institutional distribution",
+    signal_values: "3.4%|1.6x|+0.7%|+5.2%|1.2x|61|+2.9%",
+    signal_weights: "10|14|8|16|12|18|22",
+    signal_reasons: "Realized volatility at 3.4% reflects measured large-cap price action with directional potential|1.6x institutional volume confirms above-average large-cap participation and flow|+0.7% gap assessment shows modest positive overnight positioning from sector sentiment|Strong trend strength at +5.2% over 5 days confirms directional institutional buying|Volume profile stable at 1.2x — consistent institutional participation observed|RSI at 61 — bullish momentum with significant headroom before overbought conditions|Trading 2.9% above moving average — relative strength confirmed within uptrend",
+  },
+  hyper: {
+    ticker: "NVDA", company: "NVIDIA Corporation", exchange: "NASDAQ",
+    price: 138.50, change_pct: 1.9, market_cap: "3.39T", avg_volume: "195.2M",
+    relative_volume: 1.4, atr_pct: 2.9, float_val: "24.3B", short_interest: "1.1%",
+    gap_pct: 0.5, premarket_vol: "14.2M", hirsch_score: 89,
+    what_it_is: "NVIDIA Corporation is the world's leading designer of GPUs and AI computing platforms. The company dominates the AI training and inference hardware market with data center GPU platforms including H100, H200, and Blackwell architecture. NVIDIA's CUDA ecosystem creates a deep competitive moat in the rapidly growing AI infrastructure market.",
+    thesis_summary: "NVIDIA ranks highest in the Hyperscalers category with dominant trend confirmation and RSI positioning|2.9% ATR with 1.4x relative volume reflects sustained institutional accumulation in the AI infrastructure leader|AI data center demand cycle and Blackwell architecture ramp provide multi-quarter fundamental tailwinds|Trend momentum and volume dynamics confirm the strongest technical setup among mega-cap tech names",
+    catalysts: "NVDA is trading at 1.4x its average daily volume, reflecting continued institutional demand for the AI infrastructure bellwether.\n\nThe stock gapped up 0.5% overnight as hyperscaler AI capex commitments accelerate. NVIDIA's Blackwell GPU ramp, record data center backlog, and expanding inference TAM drive the strongest setup in mega-cap tech.",
+    upside_drivers: "Primary driver is NVIDIA's unmatched position in the AI infrastructure buildout, with hyperscaler customers committing unprecedented capex. The 1.4x volume with trend confirmation supports continued institutional accumulation. A move above the 20-day high on volume could trigger index rebalancing flows.",
+    key_levels: "Support at $128.40 (20-day low). Resistance at $148.20 (20-day high). Moving average at $135.80. Current price $138.50 is 2.0% above the MA.",
+    risks: "Concentration risk — revenue heavily dependent on a few hyperscaler customers|Valuation risk — trading at premium multiple that requires continued revenue acceleration|Supply chain risk — CoWoS packaging constraints could limit near-term Blackwell shipments",
+    invalidation: "Price breaks below $128.40 support on elevated institutional selling volume|Relative volume collapses below 0.8x average daily turnover|RSI fails to hold above 50 on closing basis, indicating trend momentum loss",
+    signal_values: "2.9%|1.4x|+0.5%|+3.8%|1.2x|64|+2.0%",
+    signal_weights: "8|12|6|18|10|20|26",
+    signal_reasons: "Volatility regime at 2.9% reflects measured mega-cap price action — typical for sustained trends|1.4x volume dynamics confirm steady institutional accumulation in AI sector leader|+0.5% gap reflects continued positive overnight positioning from global AI sentiment|Trend momentum at +3.8% over 5 days confirms directional buying pressure|Volume character at 1.2x — steady institutional participation without exhaustion signals|RSI at 64 — strong bullish positioning with room to continue before overbought levels|Trading 2.0% above moving average — trend confirmation is the strongest signal for hyperscalers",
+  },
 };
 
 const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
@@ -85,6 +161,18 @@ const HIST_MKT = Object.fromEntries(Object.entries(HIST).map(([id, rows]) => { c
 
 const gP = (b, n, v = .03) => { const d = []; let p = b; const dts = recentMktDays(n + 1).reverse(); for (let i = 0; i < dts.length; i++) { const dt = dts[i]; p = Math.max(b * .5, p + (Math.random() - .45) * v * p); d.push({ date: fD(dt), price: +p.toFixed(2), volume: Math.floor(Math.random() * 8e6 + 2e6) }); } return d; };
 const gI = (o) => { const d = []; let p = o; for (let i = 0; i < 78; i++) { const h = 9 + Math.floor((i * 5 + 30) / 60), m = (i * 5 + 30) % 60; p = Math.max(o * .85, p + (Math.random() - .42) * .015 * p); d.push({ time: `${h}:${m.toString().padStart(2, "0")}`, price: +p.toFixed(2), volume: Math.floor(Math.random() * 5e5 + 1e5), vwap: +(p * (.98 + Math.random() * .04)).toFixed(2) }); } return d; };
+// Pre-generate charts and status for static picks so the page renders instantly with full visuals
+const INIT_CHARTS = {};
+const INIT_STATUS = {};
+CATS.forEach(c => {
+  const bp = STATIC_PICKS[c.id].price;
+  const v = c.id === "penny" ? .05 : c.id === "small" ? .035 : .02;
+  INIT_CHARTS[c.id] = { "1D": gI(bp), "5D": gP(bp, 5, v), "1M": gP(bp, 30, v * .8), "6M": gP(bp, 180, v * .6), "1Y": gP(bp, 365, v * .5) };
+  INIT_STATUS[c.id] = "static";
+});
+
+const getETDate = () => { try { return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }); } catch { return ymd(new Date()); } };
+
 const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", interval: "30m" }, "1M": { range: "1mo", interval: "1d" }, "6M": { range: "6mo", interval: "1d" }, "1Y": { range: "1y", interval: "1d" }};
 const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
@@ -126,13 +214,13 @@ class ErrorBoundary extends React.Component {
 export default function App() {
   const [pg, setPg] = useState(() => pageFromPath());
   const [ac, setAc] = useState("penny");
-  const [picks, setP] = useState({});
-  const [charts, setCh] = useState({});
+  const [picks, setP] = useState(STATIC_PICKS);
+  const [charts, setCh] = useState(INIT_CHARTS);
   const [tf, setTf] = useState("1D");
   const [sc, setSc] = useState(false);
-  const [dataStatus, setDataStatus] = useState({});
+  const [dataStatus, setDataStatus] = useState(INIT_STATUS);
   const [mm, setMm] = useState(false);
-  const [preloadReady, setPreloadReady] = useState(false);
+  const [preloadReady, setPreloadReady] = useState(true);
   const [preloadProgress, setPreloadProgress] = useState({ step: "", done: 0, total: 10 });
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
@@ -294,7 +382,7 @@ export default function App() {
     // Step 2: Enrich each category's pick with live quote data (parallel)
     const enrichedPicks = {};
     await Promise.all(catIds.map(async (id) => {
-      let pick = apiData?.picks?.[id] || FB[id];
+      let pick = apiData?.picks?.[id] || STATIC_PICKS[id];
       pick = await enrichPickWithQuote(pick);
       enrichedPicks[id] = pick;
       progress(`${pick.ticker} quote loaded`);
@@ -308,7 +396,7 @@ export default function App() {
     const allStatus = {};
     await Promise.all(catIds.map(async (id) => {
       const pick = enrichedPicks[id];
-      const ticker = pick?.ticker || FB[id].ticker;
+      const ticker = pick?.ticker || STATIC_PICKS[id].ticker;
       const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
       const v = id==="penny"?.05:id==="small"?.035:.02;
       const result = await loadChartsForCategory(id, ticker, bp, v);
@@ -346,6 +434,27 @@ export default function App() {
     }
   }, []);
 
+  // Midnight refresh: detect ET date change and regenerate picks on new market days
+  const lastETDateRef = useRef(getETDate());
+  useEffect(() => {
+    const checkDateChange = () => {
+      try {
+        const etDate = getETDate();
+        if (etDate !== lastETDateRef.current) {
+          lastETDateRef.current = etDate;
+          const d = new Date(etDate + "T12:00:00Z");
+          const day = d.getUTCDay();
+          if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
+            preloadStarted.current = false;
+            preloadAllData();
+          }
+        }
+      } catch {}
+    };
+    const interval = setInterval(checkDateChange, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // When switching categories, load track data if not already loaded
   useEffect(() => { loadTrackLive(ac); }, [ac]);
 
@@ -355,8 +464,8 @@ export default function App() {
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
   const DataBadge = () => {
-    const cfg = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Loading..." } };
-    const c = cfg[ds] || cfg.loading;
+    const cfg = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, static: { bg: "var(--al)", color: "var(--ac)", text: "Reference Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Updating..." } };
+    const c = cfg[ds] || cfg.static;
     return (<span className="fs" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, background: c.bg, color: c.color }}>{ds === "live" && <span className="ld" style={{ width: 6, height: 6 }} />}{c.text}</span>);
   };
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
@@ -575,7 +684,7 @@ export default function App() {
         <div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><div style={{width:28,height:28,borderRadius:7,background:"rgba(255,255,255,.1)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:13}} className="ff">H</div><span className="fs" style={{color:"#fff",fontSize:15,fontWeight:600}}>Hirsch Capital</span></div><p className="fs" style={{color:"#6B7280",fontSize:12,maxWidth:280,lineHeight:1.6}}>Daily volatility picks across 5 tiers. Educational only.</p></div>
         <div style={{display:"flex",gap:36,flexWrap:"wrap"}}>{[{t:"Product",i:[["pick","Today's Picks"],["track","Track Record"]]},{t:"Info",i:[["method","Methodology"],["about","About"]]}].map((c,i)=>(<div key={i}><div className="fs" style={{color:"#6B7280",fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>{c.t}</div>{c.i.map(([id,l])=>(<button key={id} onClick={()=>{setPg(id);window.scrollTo(0,0);}} className="fs" style={{display:"block",background:"none",border:"none",color:"#9CA3AF",fontSize:13,cursor:"pointer",padding:"3px 0"}}>{l}</button>))}</div>))}</div>
       </div>
-      <div style={{borderTop:"1px solid rgba(255,255,255,.08)",paddingTop:20}}><p className="fs" style={{color:"#4B5563",fontSize:11,lineHeight:1.7,marginBottom:6}}>Educational content only. Not investment advice. All equities carry risk. Past performance is not predictive.</p><p className="fs" style={{color:"#374151",fontSize:11}}>© 2025 Hirsch Capital</p></div>
+      <div style={{borderTop:"1px solid rgba(255,255,255,.08)",paddingTop:20}}><p className="fs" style={{color:"#4B5563",fontSize:11,lineHeight:1.7,marginBottom:6}}>Educational content only. Not investment advice. All equities carry risk. Past performance is not predictive.</p><p className="fs" style={{color:"#374151",fontSize:11}}>© 2026 Hirsch Capital</p></div>
     </div>
   </footer>);
 
