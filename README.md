@@ -20,16 +20,6 @@
 
 3. **Done!** Your site is live at `https://hirsch-capital.vercel.app`
 
-### Option B: Vercel CLI
-
-```bash
-cd hirsch-deploy
-npm install
-npx vercel
-```
-
-Follow the prompts. That's it.
-
 ## Local Development
 
 ```bash
@@ -37,30 +27,38 @@ npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5173`
+## Daily pick generation (server-side)
 
-## Project Structure
+- **Single source of truth date key:** `YYYY-MM-DD`.
+- **Timezone:** `SITE_TIMEZONE` env var (default: `America/New_York`).
+- **Cron:** `vercel.json` triggers `/api/cron/daily-picks` every hour (`0 * * * *`).
+  - The cron endpoint only generates when local site time is exactly `00:00`.
+  - This keeps scheduling timezone-safe while using Vercel UTC cron.
+- **On-demand fallback:** `/api/today` generates today's picks if missing (idempotent).
+- **Persistence:** server store keeps:
+  - `daily_picks[date] = { date, timezone, picks, created_at }`
+  - `track_record[]` rows (upserted by `{date, category, ticker}` to prevent duplicates)
 
-```
-hirsch-deploy/
-├── index.html          ← HTML entry point
-├── package.json        ← Dependencies (React, Recharts)
-├── vite.config.js      ← Vite bundler config
-├── vercel.json         ← SPA routing (prevents 404s!)
-├── src/
-│   ├── main.jsx        ← React mount point
-│   └── App.jsx         ← The full Hirsch Capital app
-└── README.md
-```
+## Track record computation
 
-## How the AI picks work
+When a new date is generated:
+1. Yesterday's picks are loaded from `daily_picks`.
+2. Market candles are fetched server-side.
+3. Track rows are upserted with:
+   - `date`, `category`, `ticker`, `chosen_timestamp`
+   - `reference_price`, `close`, `high`, `low`
+   - `return_pct`, `max_run_up_pct`, `max_drawdown_pct`
 
-The app calls the Anthropic API (Claude) on page load to generate
-a fresh stock pick with deep reasoning for each market cap tier.
-If the API call fails, it falls back to pre-built demo picks.
+Client reads only:
+- `/api/today`
+- `/api/track-record`
 
-No API key is needed in the artifact environment. If deploying
-standalone, the API calls will gracefully fall back to demo data.
+Heavy screening/scoring/scheduling/persistence logic remains server-side.
+
+## Bundle-size note
+
+No additional large UI/chart dependencies were introduced.
+Charting continues to use existing Recharts and lazy-loading. Server logic stays in API routes so client bundle impact remains minimal.
 
 ## Disclaimer
 
