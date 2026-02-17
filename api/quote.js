@@ -71,6 +71,10 @@ export default async function handler(req, res) {
       premarket_price: q.preMarketPrice || null,
       exchange: q.exchangeName || q.exchange,
       company: q.longName || q.shortName,
+      // Raw numeric values for frontend metric computation
+      _raw_market_volume: q.regularMarketVolume || null,
+      _raw_avg_volume_3m: q.averageDailyVolume3Month || null,
+      _raw_market_cap: q.marketCap || null,
     });
   } catch (err) {
     return res.status(500).json({ error: 'Unexpected quote proxy error.', detail: String(err?.message || err) });
