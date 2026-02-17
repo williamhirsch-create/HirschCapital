@@ -162,7 +162,7 @@ export default function App() {
     return { time: fmtTime(dt), date: fD(dt), price, volume: Number(r.volume || 0), vwap: price };
   }).filter(r => Number.isFinite(r.price) && r.price > 0);
 
-  /** Load all 5 timeframes of chart data for a single category */
+  /** Load all 5 timeframes of chart data for a single category — fetched in parallel */
   const loadChartsForCategory = async (id, ticker, bp, v) => {
     try {
       const tfs = ["1D", "5D", "1M", "6M", "1Y"];
@@ -170,8 +170,12 @@ export default function App() {
       let price = null;
       let prevClose = null;
       let lastTs = null;
-      for (const t of tfs) {
-        const mk = await fetchMarket(ticker, t);
+      // Fetch all timeframes in parallel instead of sequentially
+      const mkResults = await Promise.allSettled(tfs.map(t => fetchMarket(ticker, t)));
+      for (let i = 0; i < tfs.length; i++) {
+        const t = tfs[i];
+        if (mkResults[i].status !== 'fulfilled') { out[t] = []; continue; }
+        const mk = mkResults[i].value;
         const pts = toChartPoints(mk.points);
         out[t] = pts;
         if (t === "1D" || !price) {
@@ -219,13 +223,16 @@ export default function App() {
 
   // Fetch all picks from the backend API (uses live market data)
   const apiPicksRef = useRef(null);
-  const fetchApiPicks = async () => {
-    if (apiPicksRef.current) return apiPicksRef.current;
+  const fetchApiPicks = async ({ force = false } = {}) => {
+    if (!force && apiPicksRef.current) return apiPicksRef.current;
     try {
-      const r = await fetch("/api/today");
+      const url = force ? "/api/today?force=true" : "/api/today";
+      const r = await fetch(url);
       if (!r.ok) return null;
       const data = await r.json();
-      apiPicksRef.current = data;
+      // Only cache if picks have real scored data
+      const hasRealData = Object.values(data?.picks || {}).some(p => p.hirsch_score > 0);
+      if (hasRealData) apiPicksRef.current = data;
       return data;
     } catch { return null; }
   };
@@ -241,20 +248,21 @@ export default function App() {
     return true;
   };
 
-  /** Enrich a pick with live quote data for fields that may be missing */
+  /** Enrich a pick with live quote data — always refreshes price-sensitive fields */
   const enrichPickWithQuote = async (pick) => {
     if (!pick?.ticker || pick.ticker === "N/A") return pick;
     const q = await fetchQuote(pick.ticker);
     if (!q) return pick;
     const enriched = { ...pick };
-    // Update price and change if quote has fresher data
+    // Always update live price fields from quote (most current source)
     if (Number.isFinite(q.price) && q.price > 0) {
       enriched.price = +q.price.toFixed(2);
       enriched.change_pct = q.change_pct ?? enriched.change_pct;
     }
-    // Fill in missing fields from quote
-    if (!enriched.market_cap || enriched.market_cap === "N/A") enriched.market_cap = q.market_cap || enriched.market_cap;
-    if (!enriched.avg_volume || enriched.avg_volume === "N/A") enriched.avg_volume = q.avg_volume || enriched.avg_volume;
+    // Always update market cap and avg volume from live quote (refreshes stale cached values)
+    if (q.market_cap) enriched.market_cap = q.market_cap;
+    if (q.avg_volume) enriched.avg_volume = q.avg_volume;
+    // Fill in other fields only if currently missing
     if (!enriched.float_val || enriched.float_val === "N/A") enriched.float_val = q.float_val || enriched.float_val;
     if (!enriched.short_interest || enriched.short_interest === "N/A") enriched.short_interest = q.short_interest || enriched.short_interest;
     if (!enriched.premarket_vol || enriched.premarket_vol === "N/A") enriched.premarket_vol = q.premarket_vol || enriched.premarket_vol;
@@ -272,7 +280,15 @@ export default function App() {
 
     // Step 1: Fetch all picks from the backend API
     setPreloadProgress({ step: "Fetching live picks from algorithm...", done: 0, total: totalSteps });
-    const apiData = await fetchApiPicks();
+    let apiData = await fetchApiPicks();
+
+    // If picks came back without real data, force a fresh regeneration
+    const picksHaveRealData = Object.values(apiData?.picks || {}).some(p => p.hirsch_score > 0);
+    if (!picksHaveRealData && apiData) {
+      setPreloadProgress({ step: "Regenerating picks with fresh live data...", done: 0, total: totalSteps });
+      const retryData = await fetchApiPicks({ force: true });
+      if (retryData) apiData = retryData;
+    }
     progress("Picks loaded");
 
     // Step 2: Enrich each category's pick with live quote data (parallel)
@@ -284,8 +300,8 @@ export default function App() {
       progress(`${pick.ticker} quote loaded`);
     }));
 
-    // Set all picks at once
-    setP(enrichedPicks);
+    // Set all picks at once so the UI can start rendering what we have
+    setP({ ...enrichedPicks });
 
     // Step 3: Load charts for all categories in parallel
     const allCharts = {};
@@ -298,9 +314,14 @@ export default function App() {
       const result = await loadChartsForCategory(id, ticker, bp, v);
       allCharts[id] = result.charts;
       allStatus[id] = result.status;
-      // Update price from chart data if available
-      if (result.priceUpdate) {
+      // Use chart's latest price if quote didn't provide one
+      if (result.priceUpdate && (!enrichedPicks[id].price || enrichedPicks[id].price <= 0)) {
         enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
+      } else if (result.priceUpdate && result.status === "live") {
+        // Chart confirms live price — update change_pct from chart if not already set by quote
+        if (!enrichedPicks[id].change_pct) {
+          enrichedPicks[id] = { ...enrichedPicks[id], change_pct: result.priceUpdate.change_pct };
+        }
       }
       progress(`${ticker} charts loaded`);
     }));
@@ -308,20 +329,6 @@ export default function App() {
     // Set all charts and status at once
     setCh(allCharts);
     setDataStatus(allStatus);
-    setP({ ...enrichedPicks }); // re-set with any price updates from charts
-
-    // Step 4: Validate all picks — flag any that still have issues
-    for (const id of catIds) {
-      if (!validatePick(enrichedPicks[id])) {
-        // Try one more fetch cycle for any invalid picks
-        try {
-          const q = await fetchQuote(enrichedPicks[id]?.ticker || FB[id].ticker);
-          if (q && Number.isFinite(q.price) && q.price > 0) {
-            enrichedPicks[id] = { ...enrichedPicks[id], price: +q.price.toFixed(2), change_pct: q.change_pct ?? 0 };
-          }
-        } catch {}
-      }
-    }
     setP({ ...enrichedPicks });
 
     // Load track records in background (not blocking page render)
@@ -343,7 +350,7 @@ export default function App() {
   useEffect(() => { loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = !preloadReady;
+  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[];
 
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
@@ -445,7 +452,7 @@ export default function App() {
   };
 
   const Pick = () => {
-    if(isLd||!pk) return <PreloadScreen/>;
+    if(!pk) return null;
     const sb=pk.thesis_summary?.split("|")||[];const rk=pk.risks?.split("|")||[];const iv=pk.invalidation?.split("|")||[];
     const sv=pk.signal_values?.split("|")||[];const sw=pk.signal_weights?.split("|")||[];const sr=pk.signal_reasons?.split("|")||[];
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
@@ -574,8 +581,19 @@ export default function App() {
 
   return(<ErrorBoundary><div className="fs" style={{background:"var(--bg)",minHeight:"100vh",color:"var(--tx)"}}>
     <style>{CSS}</style><Nav/>
-    {pg==="home"&&<Home/>}{pg==="pick"&&<Pick/>}{pg==="track"&&<Track/>}{pg==="method"&&<Method/>}{pg==="about"&&<About/>}
+    {!preloadReady ? (
+      <div style={{minHeight:"calc(100vh - 80px)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <PreloadScreen/>
+      </div>
+    ) : (
+      <>
+        {pg==="home"&&<Home/>}
+        {pg==="pick"&&<Pick/>}
+        {pg==="track"&&<Track/>}
+        {pg==="method"&&<Method/>}
+        {pg==="about"&&<About/>}
+      </>
+    )}
     <Foot/>
-    {!preloadReady&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--dk)",color:"#fff",padding:"12px 20px",borderRadius:12,display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,.3)"}}><div style={{width:14,height:14,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"#fff",borderRadius:"50%",animation:"sp .8s linear infinite"}}/><span className="fs" style={{fontSize:13}}>Loading live market data... {Math.round((preloadProgress.done / Math.max(1, preloadProgress.total)) * 100)}%</span></div>}
   </div></ErrorBoundary>);
 }

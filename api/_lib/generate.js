@@ -309,13 +309,15 @@ const buildTrackRow = async (pick, dateKey) => {
   };
 };
 
-export const generateDailyPicks = async (dateKey) => {
+export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
   const store = await getStore();
   store.daily_picks ||= {};
   store.track_record ||= [];
 
-  // Return cached picks only if same algorithm version
-  if (store.daily_picks[dateKey]?.version === ALGO_VERSION) return store.daily_picks[dateKey];
+  // Return cached picks only if same algorithm version AND picks have real data
+  const cached = store.daily_picks[dateKey];
+  const cachedHasRealData = cached && Object.values(cached.picks || {}).some(p => p.hirsch_score > 0);
+  if (!force && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
   // Build track record from previous day's picks
   const prevKey = previousDateKey(dateKey);
@@ -340,8 +342,12 @@ export const generateDailyPicks = async (dateKey) => {
     created_at: new Date().toISOString(),
     version: ALGO_VERSION,
   };
-  store.daily_picks[dateKey] = payload;
-  await setStore(store);
+  // Only persist if at least one category has real scored data
+  const hasRealData = Object.values(picks).some(p => p.hirsch_score > 0);
+  if (hasRealData) {
+    store.daily_picks[dateKey] = payload;
+    await setStore(store);
+  }
   return payload;
 };
 

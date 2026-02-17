@@ -1,3 +1,6 @@
+const YF_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 export default async function handler(req, res) {
   try {
     const symbol = String(req.query.symbol || '').trim().toUpperCase();
@@ -5,10 +8,25 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing symbol query parameter.' });
     }
 
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-    const upstream = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 HirschCapital/1.0' } });
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: `Upstream quote API failed (${upstream.status}).` });
+    const qs = new URLSearchParams({
+      symbols: symbol,
+      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+    }).toString();
+
+    let upstream = null;
+    let lastStatus = 502;
+    for (const host of YF_HOSTS) {
+      try {
+        const r = await fetch(`https://${host}/v7/finance/quote?${qs}`, {
+          headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+        });
+        if (r.ok) { upstream = r; break; }
+        lastStatus = r.status;
+      } catch { /* try next host */ }
+    }
+
+    if (!upstream) {
+      return res.status(lastStatus).json({ error: `Upstream quote API failed (${lastStatus}).` });
     }
 
     const raw = await upstream.json();
