@@ -12,3 +12,142 @@ export const fetchChart = async (symbol, range = '5d', interval = '1d') => {
     points: ts.map((t, i) => ({ ts: t, open: q.open?.[i], high: q.high?.[i], low: q.low?.[i], close: q.close?.[i], volume: q.volume?.[i] })).filter(p => Number.isFinite(p.ts) && Number.isFinite(p.close)),
   };
 };
+
+/** Fetch batch quotes from Yahoo Finance v7 endpoint. Returns array of quote objects or null on failure. */
+export const fetchQuotes = async (symbols) => {
+  try {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.map(s => encodeURIComponent(s)).join(',')}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 HirschCapital/1.0' } });
+    if (!r.ok) return null;
+    const raw = await r.json();
+    return raw?.quoteResponse?.result || null;
+  } catch { return null; }
+};
+
+/** Compute Average True Range from OHLCV points */
+export const computeATR = (points, period = 14) => {
+  if (!points || points.length < 2) return 0;
+  const trs = [];
+  for (let i = 1; i < points.length; i++) {
+    const h = points[i].high, l = points[i].low, pc = points[i - 1].close;
+    if (!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc)) continue;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  if (trs.length === 0) return 0;
+  const used = trs.slice(-Math.min(period, trs.length));
+  return used.reduce((a, b) => a + b, 0) / used.length;
+};
+
+/** Compute RSI from close prices */
+export const computeRSI = (points, period = 14) => {
+  if (!points || points.length < period + 1) return 50;
+  const closes = points.map(p => p.close).filter(Number.isFinite);
+  if (closes.length < period + 1) return 50;
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) avgGain += diff; else avgLoss += Math.abs(diff);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (diff < 0 ? Math.abs(diff) : 0)) / period;
+  }
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return +(100 - 100 / (1 + rs)).toFixed(1);
+};
+
+/** Compute all live metrics from chart data and optional quote data */
+export const computeMetrics = (chart, quote = null) => {
+  const points = chart?.points || [];
+  if (points.length < 2) return null;
+
+  const latest = points[points.length - 1];
+  const prev = points[points.length - 2];
+  const price = Number(quote?.regularMarketPrice ?? latest.close);
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  // ATR%
+  const atr = computeATR(points);
+  const atr_pct = price > 0 ? +((atr / price) * 100).toFixed(1) : 0;
+
+  // Relative volume
+  const volumes = points.map(p => p.volume).filter(Number.isFinite);
+  const avgVol = quote?.averageDailyVolume3Month
+    || (volumes.length > 1 ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1) : 1);
+  const todayVol = quote?.regularMarketVolume ?? latest.volume ?? 0;
+  const relative_volume = avgVol > 0 ? +(todayVol / avgVol).toFixed(1) : 1;
+
+  // Gap %
+  const prevClose = Number(prev?.close ?? quote?.regularMarketPreviousClose ?? price);
+  const todayOpen = Number(latest.open ?? price);
+  const gap_pct = prevClose > 0 ? +(((todayOpen - prevClose) / prevClose) * 100).toFixed(1) : 0;
+
+  // 5D momentum
+  const fiveDayAgo = points.length >= 6 ? points[points.length - 6] : points[0];
+  const momentum_5d = fiveDayAgo.close > 0 ? +(((price - fiveDayAgo.close) / fiveDayAgo.close) * 100).toFixed(1) : 0;
+
+  // 20D momentum
+  const twentyDayAgo = points.length >= 21 ? points[points.length - 21] : points[0];
+  const momentum_20d = twentyDayAgo.close > 0 ? +(((price - twentyDayAgo.close) / twentyDayAgo.close) * 100).toFixed(1) : 0;
+
+  // RSI
+  const rsi = computeRSI(points);
+
+  // Volume trend (last 5 days avg vs prior 5 days avg)
+  const recentVols = volumes.slice(-5);
+  const olderVols = volumes.slice(-10, -5);
+  const recentAvg = recentVols.length ? recentVols.reduce((a, b) => a + b, 0) / recentVols.length : 0;
+  const olderAvg = olderVols.length ? olderVols.reduce((a, b) => a + b, 0) / olderVols.length : 1;
+  const volume_trend = olderAvg > 0 ? +(recentAvg / olderAvg).toFixed(1) : 1;
+
+  // Price vs 50-day MA (if we have enough data)
+  const closes = points.map(p => p.close).filter(Number.isFinite);
+  const ma50 = closes.length >= 50
+    ? +(closes.slice(-50).reduce((a, b) => a + b, 0) / 50).toFixed(2)
+    : closes.length >= 20
+      ? +(closes.slice(-20).reduce((a, b) => a + b, 0) / closes.length).toFixed(2)
+      : price;
+  const price_vs_ma = ma50 > 0 ? +(((price - ma50) / ma50) * 100).toFixed(1) : 0;
+
+  // Market cap (from quote or null)
+  const marketCap = quote?.marketCap || null;
+
+  // Change %
+  const change_pct = quote?.regularMarketChangePercent
+    ?? (prevClose > 0 ? +(((price - prevClose) / prevClose) * 100).toFixed(1) : 0);
+
+  // Support/resistance from recent data
+  const highs = points.slice(-20).map(p => p.high).filter(Number.isFinite);
+  const lows = points.slice(-20).map(p => p.low).filter(Number.isFinite);
+  const recent_high = highs.length ? +Math.max(...highs).toFixed(2) : price;
+  const recent_low = lows.length ? +Math.min(...lows).toFixed(2) : price;
+
+  // Average volume formatted
+  const fmtVol = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(Math.round(v));
+
+  return {
+    price: +price.toFixed(2),
+    prevClose: +prevClose.toFixed(2),
+    change_pct: +Number(change_pct).toFixed(1),
+    marketCap,
+    atr_pct,
+    relative_volume,
+    gap_pct,
+    momentum_5d,
+    momentum_20d,
+    rsi,
+    volume_trend,
+    price_vs_ma,
+    ma50,
+    recent_high,
+    recent_low,
+    todayVolume: todayVol,
+    avgVolume: avgVol,
+    avgVolume_fmt: fmtVol(avgVol),
+    todayVolume_fmt: fmtVol(todayVol),
+  };
+};

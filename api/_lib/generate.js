@@ -1,54 +1,286 @@
-import { CANDIDATES, CATEGORIES, SITE_TIMEZONE } from './constants.js';
-import { fetchChart } from './market.js';
+import { CANDIDATES, CATEGORIES, SITE_TIMEZONE, SIGNAL_LABELS, SIGNAL_WEIGHTS, ALGO_VERSION } from './constants.js';
+import { fetchChart, fetchQuotes, computeMetrics } from './market.js';
 import { getStore, setStore, upsertTrackRow } from './store.js';
 import { previousDateKey } from './date.js';
 
 const toDate = (ts, tz = SITE_TIMEZONE) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts * 1000));
 
-const scoreCandidate = (c) => {
-  const score = (
-    Math.min(25, c.atr_pct * 1.6) +
-    Math.min(25, c.relative_volume * 6) +
-    Math.min(15, Math.abs(c.gap_pct) * 2) +
-    Math.min(15, c.short_interest * 0.8) +
-    Math.min(20, Math.log10((c.marketCap || 1) + 10) * 2)
-  );
-  return Math.max(60, Math.min(99, Math.round(score)));
+const fmtCap = (cap) => {
+  if (!cap || !Number.isFinite(cap)) return 'N/A';
+  if (cap >= 1e12) return `${(cap / 1e12).toFixed(2)}T`;
+  if (cap >= 1e9) return `${(cap / 1e9).toFixed(1)}B`;
+  return `${Math.round(cap / 1e6)}M`;
 };
 
-const selectTopPick = (categoryId, dateKey) => {
-  const candidates = (CANDIDATES[categoryId] || []).map((c) => {
-    const hirsch_score = scoreCandidate(c);
-    return {
-      ...c,
+const fitsCategory = (metrics, cat) => {
+  if (!metrics) return false;
+  const price = metrics.price;
+  const cap = metrics.marketCap;
+  if (!Number.isFinite(price) || price <= 0) return false;
+  if (cat.minPrice !== undefined && price < cat.minPrice) return false;
+  if (cat.maxPrice !== undefined && price > cat.maxPrice) return false;
+  if (cat.minCap !== undefined) {
+    if (!Number.isFinite(cap)) return false;
+    if (cap < cat.minCap) return false;
+  }
+  if (cat.maxCap !== undefined && Number.isFinite(cap) && cap > cat.maxCap) return false;
+  return true;
+};
+
+/** Compute 7 raw signal scores from live metrics, using category-specific weights */
+const computeSignalScores = (m, categoryId) => {
+  const weights = SIGNAL_WEIGHTS[categoryId] || [14, 14, 14, 14, 14, 15, 15];
+  // Each signal produces a 0-1 normalized score, then scaled by weight
+  const raw = [
+    // Signal 1: ATR% (volatility) — higher = more volatile = higher score for penny, lower importance for hyper
+    Math.min(1, m.atr_pct / 15),
+    // Signal 2: Relative volume — higher = more unusual activity
+    Math.min(1, m.relative_volume / 5),
+    // Signal 3: Gap % — larger gap = stronger catalyst reaction
+    Math.min(1, Math.abs(m.gap_pct) / 8),
+    // Signal 4: 5D Momentum — stronger trend = higher conviction
+    Math.min(1, Math.abs(m.momentum_5d) / 20),
+    // Signal 5: Volume trend — accelerating volume
+    Math.min(1, Math.max(0, m.volume_trend - 0.5) / 2),
+    // Signal 6: RSI positioning — favor 40-70 range (not overbought, not oversold)
+    m.rsi >= 40 && m.rsi <= 70 ? 0.8 : m.rsi >= 30 && m.rsi <= 80 ? 0.5 : 0.2,
+    // Signal 7: Trend position (price vs MA) — above MA = bullish
+    Math.min(1, Math.max(0, (m.price_vs_ma + 10) / 25)),
+  ];
+
+  const weighted = raw.map((s, i) => s * weights[i]);
+  const total = weighted.reduce((a, b) => a + b, 0);
+  const maxPossible = weights.reduce((a, b) => a + b, 0);
+  const hirsch_score = Math.max(60, Math.min(99, Math.round((total / maxPossible) * 100)));
+
+  return { raw, weighted, hirsch_score };
+};
+
+/** Format signal values for display */
+const formatSignalValues = (m) => [
+  `${m.atr_pct}%`,
+  `${m.relative_volume}x`,
+  `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}%`,
+  `${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}%`,
+  `${m.volume_trend}x`,
+  `${m.rsi}`,
+  `${m.price_vs_ma > 0 ? '+' : ''}${m.price_vs_ma}%`,
+];
+
+/** Generate signal reasoning based on actual live data */
+const generateSignalReasons = (m, categoryId) => {
+  const atrReason = m.atr_pct >= 8 ? `ATR at ${m.atr_pct}% indicates high volatility regime — favorable for directional moves`
+    : m.atr_pct >= 4 ? `ATR at ${m.atr_pct}% shows moderate volatility — typical for active swing setups`
+    : `ATR at ${m.atr_pct}% reflects lower volatility — tighter risk management needed`;
+
+  const volReason = m.relative_volume >= 3 ? `${m.relative_volume}x average volume signals unusual institutional or retail interest`
+    : m.relative_volume >= 1.5 ? `${m.relative_volume}x relative volume shows above-average participation`
+    : `Volume at ${m.relative_volume}x average — normal trading activity`;
+
+  const gapReason = Math.abs(m.gap_pct) >= 3 ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}% gap suggests overnight catalyst absorption`
+    : Math.abs(m.gap_pct) >= 1 ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}% gap indicates modest overnight positioning shift`
+    : `Minimal gap (${m.gap_pct}%) — no significant overnight catalyst detected`;
+
+  const momReason = Math.abs(m.momentum_5d) >= 10 ? `Strong ${m.momentum_5d > 0 ? 'bullish' : 'bearish'} 5-day momentum at ${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}%`
+    : Math.abs(m.momentum_5d) >= 3 ? `Moderate ${m.momentum_5d > 0 ? 'positive' : 'negative'} 5-day trend at ${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}%`
+    : `5-day momentum flat at ${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}% — watch for breakout`;
+
+  const vtReason = m.volume_trend >= 1.5 ? `Volume accelerating at ${m.volume_trend}x recent trend — building conviction`
+    : m.volume_trend >= 1 ? `Volume trend stable at ${m.volume_trend}x — consistent participation`
+    : `Volume declining at ${m.volume_trend}x — watch for follow-through`;
+
+  const rsiReason = m.rsi >= 70 ? `RSI at ${m.rsi} — overbought territory, momentum strong but pullback risk elevated`
+    : m.rsi >= 50 ? `RSI at ${m.rsi} — bullish momentum with room to run before overbought`
+    : m.rsi >= 30 ? `RSI at ${m.rsi} — neutral to oversold, potential for mean reversion bounce`
+    : `RSI at ${m.rsi} — deeply oversold, contrarian bounce setup if support holds`;
+
+  const trendReason = m.price_vs_ma > 5 ? `Trading ${m.price_vs_ma}% above moving average — strong uptrend confirmed`
+    : m.price_vs_ma > 0 ? `${m.price_vs_ma}% above moving average — mild bullish positioning`
+    : m.price_vs_ma > -5 ? `${m.price_vs_ma}% below moving average — testing support zone`
+    : `${m.price_vs_ma}% below moving average — downtrend, reversal needed for bullish thesis`;
+
+  return [atrReason, volReason, gapReason, momReason, vtReason, rsiReason, trendReason];
+};
+
+/** Generate thesis text based on live metrics */
+const generateThesis = (ticker, company, m, categoryId, catLabel) => {
+  const bullish = m.momentum_5d > 0 || m.gap_pct > 0 || m.rsi > 50;
+  const direction = bullish ? 'bullish' : 'neutral-to-bearish';
+  const volDesc = m.relative_volume >= 3 ? 'significant volume surge' : m.relative_volume >= 1.5 ? 'above-average volume' : 'normal volume levels';
+
+  const thesis_summary = [
+    `${company} ranks highest in the ${catLabel} category today with a data-driven signal stack`,
+    `${m.atr_pct}% ATR with ${m.relative_volume}x relative volume creates an actionable volatility setup`,
+    `5-day momentum at ${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}% and RSI at ${m.rsi} indicates ${direction} near-term positioning`,
+    `Live data confirms elevated activity — risk controls and key levels must still be respected`,
+  ].join('|');
+
+  const catalysts = `${ticker} is showing ${volDesc} with ${m.relative_volume}x its average daily turnover. ` +
+    `Today's ${m.gap_pct > 0 ? 'positive' : m.gap_pct < 0 ? 'negative' : 'flat'} gap of ${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}% reflects overnight market positioning.\n\n` +
+    `The stock has moved ${m.momentum_5d > 0 ? '+' : ''}${m.momentum_5d}% over the past 5 trading sessions ` +
+    `and ${m.momentum_20d > 0 ? '+' : ''}${m.momentum_20d}% over 20 days. ` +
+    `RSI at ${m.rsi} ${m.rsi > 70 ? 'suggests overbought conditions — momentum is strong but caution warranted' :
+      m.rsi > 50 ? 'indicates bullish momentum with room to continue' :
+      m.rsi > 30 ? 'shows neutral positioning with potential for a move in either direction' :
+      'signals oversold conditions — a potential contrarian setup if support holds'}.`;
+
+  const upside_drivers = bullish
+    ? `Primary driver is continuation under the ${m.atr_pct}% ATR volatility regime with ${m.relative_volume}x volume supporting directional moves. ` +
+      `A break above the recent high at $${m.recent_high} on sustained volume could trigger momentum-following algorithms and extend the move.`
+    : `Setup is based on mean-reversion potential from current levels near $${m.price}. ` +
+      `Volume at ${m.relative_volume}x average suggests market participants are engaged. ` +
+      `A hold of the $${m.recent_low} support level could provide the base for a recovery toward $${m.ma50} (moving average).`;
+
+  const key_levels = `Support at $${m.recent_low} (20-day low). ` +
+    `Resistance at $${m.recent_high} (20-day high). ` +
+    `Moving average at $${m.ma50}. ` +
+    `Current price $${m.price} is ${m.price_vs_ma > 0 ? `${m.price_vs_ma}% above` : `${Math.abs(m.price_vs_ma)}% below`} the MA.`;
+
+  const risks = [
+    `Volatility risk — ${m.atr_pct}% ATR means ${categoryId === 'penny' ? 'wide intraday swings, halts, and gap risk' : 'significant price swings possible'}`,
+    `Volume fade risk — if relative volume drops below 1.0x, momentum thesis weakens`,
+    `${m.rsi > 70 ? 'Overbought RSI at ' + m.rsi + ' increases pullback probability' :
+      m.rsi < 30 ? 'Oversold RSI at ' + m.rsi + ' — continued selling possible before reversal' :
+      'Broader market reversal could override individual stock momentum'}`,
+  ].join('|');
+
+  const invalidation = [
+    `Price breaks ${bullish ? 'below' : 'above'} $${bullish ? m.recent_low : m.recent_high} on heavy volume`,
+    `Relative volume collapses below 0.8x average`,
+    `RSI ${m.rsi > 50 ? 'drops below 40' : 'fails to recover above 50'} on closing basis`,
+  ].join('|');
+
+  return { thesis_summary, catalysts, upside_drivers, key_levels, risks, invalidation };
+};
+
+/** Fetch live data and enrich candidates for a category */
+const fetchAndEnrichCandidates = async (categoryId) => {
+  const cat = CATEGORIES.find(c => c.id === categoryId);
+  const tickers = (CANDIDATES[categoryId] || []).map(c => c.ticker);
+  if (!tickers.length || !cat) return [];
+
+  // Try batch quote endpoint for market cap and real-time data
+  const quotes = await fetchQuotes(tickers);
+  const quoteMap = {};
+  if (quotes) {
+    for (const q of quotes) quoteMap[q.symbol] = q;
+  }
+
+  // Fetch 1-month daily charts for all candidates in parallel
+  const chartResults = await Promise.allSettled(
+    tickers.map(t => fetchChart(t, '1mo', '1d'))
+  );
+
+  const enriched = [];
+  for (let i = 0; i < tickers.length; i++) {
+    const ticker = tickers[i];
+    const info = CANDIDATES[categoryId].find(c => c.ticker === ticker);
+    const chart = chartResults[i].status === 'fulfilled' ? chartResults[i].value : null;
+    if (!chart || !chart.points?.length) continue;
+
+    const quote = quoteMap[ticker] || null;
+    const metrics = computeMetrics(chart, quote);
+    if (!metrics) continue;
+
+    // Validate the ticker still fits this category
+    if (!fitsCategory(metrics, cat)) continue;
+
+    const { raw, weighted, hirsch_score } = computeSignalScores(metrics, categoryId);
+
+    enriched.push({
+      ticker,
+      company: quote?.longName || quote?.shortName || info.company,
+      exchange: quote?.exchangeName || info.exchange,
+      metrics,
       hirsch_score,
-      date: dateKey,
-      category: categoryId,
-      signal_values: `${c.atr_pct}%|${c.relative_volume}x|${c.gap_pct}%|${c.short_interest}%|${c.marketCap}`,
-      signal_weights: '25|25|15|15|20',
-      signal_reasons: 'ATR volatility regime|Relative volume expansion|Gap/catalyst reaction|Short-interest squeeze potential|Liquidity/size stability',
-      thesis_summary: `${c.company} screens highest in ${categoryId}|Volatility and liquidity are elevated|Signal stack supports high-conviction pick|Risk controls still required`,
-      catalysts: `${c.thesis}\n\nModel selected this candidate using current HirschScore weighting.`,
-      upside_drivers: 'Primary driver is continuation under elevated volatility and volume conditions.',
-      key_levels: 'Use opening range and prior day high/low as core levels.',
-      risks: 'Gap fade risk|Market beta reversal|Liquidity vacuum',
-      invalidation: 'Break of opening range support|Relative volume collapse',
-      what_it_is: c.company,
-      market_cap: c.marketCap >= 1e12 ? `${(c.marketCap / 1e12).toFixed(2)}T` : c.marketCap >= 1e9 ? `${(c.marketCap / 1e9).toFixed(1)}B` : `${Math.round(c.marketCap / 1e6)}M`,
-      avg_volume: 'N/A',
-      float_val: 'N/A',
-      short_interest: `${c.short_interest}%`,
-      premarket_vol: c.premarket_vol,
-      change_pct: 0,
-      score: hirsch_score,
-      signals_json: { atr_pct: c.atr_pct, relative_volume: c.relative_volume, gap_pct: c.gap_pct, short_interest: c.short_interest },
-      thesis_json: { summary: c.thesis },
+      signalScores: { raw, weighted },
+    });
+  }
+
+  return enriched.sort((a, b) => b.hirsch_score - a.hirsch_score);
+};
+
+/** Select the top pick for a category using live data */
+const selectTopPick = async (categoryId, dateKey) => {
+  const cat = CATEGORIES.find(c => c.id === categoryId);
+  const catLabel = cat?.label || categoryId;
+  const enriched = await fetchAndEnrichCandidates(categoryId);
+
+  if (!enriched.length) {
+    // Fallback: return a minimal placeholder if no live data available
+    const fallback = CANDIDATES[categoryId]?.[0];
+    return {
+      ticker: fallback?.ticker || 'N/A',
+      company: fallback?.company || 'Data unavailable',
+      exchange: fallback?.exchange || 'N/A',
+      price: 0, change_pct: 0, market_cap: 'N/A', avg_volume: 'N/A',
+      hirsch_score: 0, date: dateKey, category: categoryId,
+      thesis_summary: 'Live data unavailable — could not generate pick for this category',
+      catalysts: 'Market data feed returned no results for candidates in this category.',
+      upside_drivers: 'N/A', key_levels: 'N/A', risks: 'No data available', invalidation: 'N/A',
+      what_it_is: fallback?.company || 'N/A',
+      signal_values: 'N/A|N/A|N/A|N/A|N/A|N/A|N/A',
+      signal_weights: (SIGNAL_WEIGHTS[categoryId] || []).join('|'),
+      signal_reasons: 'Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable',
       created_at: new Date().toISOString(),
       chosen_timestamp: new Date().toISOString(),
-      reference_price: c.price,
+      reference_price: 0,
+      data_source: 'none',
     };
-  });
-  return candidates.sort((a, b) => b.hirsch_score - a.hirsch_score)[0];
+  }
+
+  const winner = enriched[0];
+  const m = winner.metrics;
+  const weights = SIGNAL_WEIGHTS[categoryId] || [];
+  const thesis = generateThesis(winner.ticker, winner.company, m, categoryId, catLabel);
+  const signalValues = formatSignalValues(m);
+  const signalReasons = generateSignalReasons(m, categoryId);
+
+  return {
+    ticker: winner.ticker,
+    company: winner.company,
+    exchange: winner.exchange,
+    price: m.price,
+    change_pct: m.change_pct,
+    market_cap: fmtCap(m.marketCap),
+    avg_volume: m.avgVolume_fmt,
+    relative_volume: m.relative_volume,
+    atr_pct: m.atr_pct,
+    float_val: 'N/A',
+    short_interest: 'N/A',
+    gap_pct: m.gap_pct,
+    premarket_vol: 'N/A',
+    hirsch_score: winner.hirsch_score,
+    date: dateKey,
+    category: categoryId,
+    score: winner.hirsch_score,
+
+    // Signal details (pipe-delimited for UI)
+    signal_values: signalValues.join('|'),
+    signal_weights: weights.join('|'),
+    signal_reasons: signalReasons.join('|'),
+
+    // Thesis
+    thesis_summary: thesis.thesis_summary,
+    catalysts: thesis.catalysts,
+    upside_drivers: thesis.upside_drivers,
+    key_levels: thesis.key_levels,
+    risks: thesis.risks,
+    invalidation: thesis.invalidation,
+    what_it_is: winner.company,
+
+    // Meta
+    signals_json: {
+      atr_pct: m.atr_pct, relative_volume: m.relative_volume,
+      gap_pct: m.gap_pct, momentum_5d: m.momentum_5d,
+      rsi: m.rsi, volume_trend: m.volume_trend, price_vs_ma: m.price_vs_ma,
+    },
+    thesis_json: { summary: thesis.thesis_summary },
+    created_at: new Date().toISOString(),
+    chosen_timestamp: new Date().toISOString(),
+    reference_price: m.price,
+    data_source: 'live',
+  };
 };
 
 const buildTrackRow = async (pick, dateKey) => {
@@ -82,8 +314,10 @@ export const generateDailyPicks = async (dateKey) => {
   store.daily_picks ||= {};
   store.track_record ||= [];
 
-  if (store.daily_picks[dateKey]) return store.daily_picks[dateKey];
+  // Return cached picks only if same algorithm version
+  if (store.daily_picks[dateKey]?.version === ALGO_VERSION) return store.daily_picks[dateKey];
 
+  // Build track record from previous day's picks
   const prevKey = previousDateKey(dateKey);
   const prev = store.daily_picks[prevKey];
   if (prev?.picks) {
@@ -93,10 +327,19 @@ export const generateDailyPicks = async (dateKey) => {
     }
   }
 
+  // Generate fresh picks using live data for all categories
   const picks = {};
-  for (const c of CATEGORIES) picks[c.id] = selectTopPick(c.id, dateKey);
+  for (const c of CATEGORIES) {
+    picks[c.id] = await selectTopPick(c.id, dateKey);
+  }
 
-  const payload = { date: dateKey, timezone: SITE_TIMEZONE, picks, created_at: new Date().toISOString() };
+  const payload = {
+    date: dateKey,
+    timezone: SITE_TIMEZONE,
+    picks,
+    created_at: new Date().toISOString(),
+    version: ALGO_VERSION,
+  };
   store.daily_picks[dateKey] = payload;
   await setStore(store);
   return payload;
