@@ -1,5 +1,17 @@
-import { useState, useEffect, useRef } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Bar, CartesianGrid, Line } from "recharts";
+import { useState, useEffect, useRef, Suspense, lazy } from "react";
+
+const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
+
+const VALID_PAGES = ["home","pick","track","method","about"];
+const pageFromPath = () => {
+  const p = window.location.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
+  return VALID_PAGES.includes(p) ? p : "home";
+};
+
+const pctRet = (entry, exit) => {
+  if (!entry || entry === 0) return 0;
+  return ((exit - entry) / entry) * 100;
+};
 
 const CATS = [
   { id: "penny", label: "Penny Stocks", short: "Penny", color: "#FF4757", range: "$0.10-$5", crit: "Price < $5, micro-cap", icon: "⚡" },
@@ -102,6 +114,8 @@ export default function App() {
   const [mm, setMm] = useState(false);
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
+  useEffect(() => { const path = pg === "home" ? "/" : `/${pg}`; if (window.location.pathname !== path) window.history.pushState(null, "", path); }, [pg]);
+  useEffect(() => { const h = () => setPg(pageFromPath()); window.addEventListener("popstate", h); return () => window.removeEventListener("popstate", h); }, []);
 
   const [trackLive, setTrackLive] = useState({});
 
