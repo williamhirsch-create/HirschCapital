@@ -220,7 +220,7 @@ export default function App() {
   const [sc, setSc] = useState(false);
   const [dataStatus, setDataStatus] = useState(INIT_STATUS);
   const [mm, setMm] = useState(false);
-  const [preloadReady, setPreloadReady] = useState(true);
+  const [preloadReady, setPreloadReady] = useState(false);
   const [preloadProgress, setPreloadProgress] = useState({ step: "", done: 0, total: 10 });
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
@@ -267,8 +267,11 @@ export default function App() {
         const pts = toChartPoints(mk.points);
         out[t] = pts;
         if (t === "1D" || !price) {
+          // Prefer regularMarketPrice from meta (most current), then last chart point
           const last = mk.points?.[mk.points.length - 1];
-          price = Number(last?.close ?? mk.meta?.regularMarketPrice ?? price);
+          const metaPrice = Number(mk.meta?.regularMarketPrice);
+          const lastClose = Number(last?.close);
+          price = Number.isFinite(metaPrice) && metaPrice > 0 ? metaPrice : (Number.isFinite(lastClose) && lastClose > 0 ? lastClose : price);
           prevClose = Number(mk.meta?.chartPreviousClose ?? mk.meta?.previousClose ?? prevClose);
           if (last?.ts) lastTs = last.ts * 1000;
         }
@@ -336,26 +339,56 @@ export default function App() {
     return true;
   };
 
-  /** Enrich a pick with live quote data — always refreshes price-sensitive fields */
+  /** Fetch Google Finance data for a ticker */
+  const fetchGFinance = async (ticker, exchange) => {
+    try {
+      let url = `/api/gfinance?symbol=${encodeURIComponent(ticker)}`;
+      if (exchange) url += `&exchange=${encodeURIComponent(exchange)}`;
+      const rs = await fetch(url);
+      if (!rs.ok) return null;
+      return rs.json();
+    } catch { return null; }
+  };
+
+  /** Enrich a pick with live data from Yahoo quote + Google Finance — always refreshes ALL fields */
   const enrichPickWithQuote = async (pick) => {
     if (!pick?.ticker || pick.ticker === "N/A") return pick;
-    const q = await fetchQuote(pick.ticker);
-    if (!q) return pick;
+    // Fetch from both Yahoo quote and Google Finance in parallel
+    const [q, gf] = await Promise.all([
+      fetchQuote(pick.ticker),
+      fetchGFinance(pick.ticker, pick.exchange),
+    ]);
     const enriched = { ...pick };
-    // Always update live price fields from quote (most current source)
-    if (Number.isFinite(q.price) && q.price > 0) {
+
+    // Google Finance is the preferred source for price/change (matches chart)
+    if (gf && Number.isFinite(gf.price) && gf.price > 0) {
+      enriched.price = +gf.price.toFixed(2);
+      if (Number.isFinite(gf.change_pct)) enriched.change_pct = gf.change_pct;
+    } else if (q && Number.isFinite(q.price) && q.price > 0) {
       enriched.price = +q.price.toFixed(2);
       enriched.change_pct = q.change_pct ?? enriched.change_pct;
     }
-    // Always update market cap and avg volume from live quote (refreshes stale cached values)
-    if (q.market_cap) enriched.market_cap = q.market_cap;
-    if (q.avg_volume) enriched.avg_volume = q.avg_volume;
-    // Fill in other fields only if currently missing
-    if (!enriched.float_val || enriched.float_val === "N/A") enriched.float_val = q.float_val || enriched.float_val;
-    if (!enriched.short_interest || enriched.short_interest === "N/A") enriched.short_interest = q.short_interest || enriched.short_interest;
-    if (!enriched.premarket_vol || enriched.premarket_vol === "N/A") enriched.premarket_vol = q.premarket_vol || enriched.premarket_vol;
-    if (!enriched.exchange || enriched.exchange === "N/A") enriched.exchange = q.exchange || enriched.exchange;
-    if (!enriched.company) enriched.company = q.company || enriched.company;
+
+    // Market cap: prefer Google Finance, fall back to Yahoo
+    if (gf?.market_cap) enriched.market_cap = gf.market_cap;
+    else if (q?.market_cap) enriched.market_cap = q.market_cap;
+
+    // Avg volume: prefer Google Finance, fall back to Yahoo
+    if (gf?.avg_volume) enriched.avg_volume = gf.avg_volume;
+    else if (q?.avg_volume) enriched.avg_volume = q.avg_volume;
+
+    // Always update remaining fields from Yahoo (Google doesn't provide these)
+    if (q?.float_val) enriched.float_val = q.float_val;
+    if (q?.short_interest) enriched.short_interest = q.short_interest;
+    if (q?.premarket_vol) enriched.premarket_vol = q.premarket_vol;
+    if (q?.exchange) enriched.exchange = q.exchange;
+    if (q?.company) enriched.company = q.company;
+
+    // Store Google Finance previous close for gap calculation
+    if (gf?.previous_close && Number.isFinite(gf.previous_close) && gf.previous_close > 0) {
+      enriched._prevClose = gf.previous_close;
+    }
+
     return enriched;
   };
 
@@ -402,14 +435,9 @@ export default function App() {
       const result = await loadChartsForCategory(id, ticker, bp, v);
       allCharts[id] = result.charts;
       allStatus[id] = result.status;
-      // Use chart's latest price if quote didn't provide one
-      if (result.priceUpdate && (!enrichedPicks[id].price || enrichedPicks[id].price <= 0)) {
+      // Always use chart's price/change_pct so displayed values match the live chart
+      if (result.priceUpdate && Number.isFinite(result.priceUpdate.price) && result.priceUpdate.price > 0) {
         enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
-      } else if (result.priceUpdate && result.status === "live") {
-        // Chart confirms live price — update change_pct from chart if not already set by quote
-        if (!enrichedPicks[id].change_pct) {
-          enrichedPicks[id] = { ...enrichedPicks[id], change_pct: result.priceUpdate.change_pct };
-        }
       }
       progress(`${ticker} charts loaded`);
     }));
