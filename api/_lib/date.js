@@ -15,10 +15,27 @@ export const todayKey = (date = new Date(), tz = SITE_TIMEZONE) => {
   return `${p.year}-${p.month}-${p.day}`;
 };
 
-export const previousDateKey = (dateKey) => {
-  const d = new Date(`${dateKey}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
+const US_MKT_HOLIDAYS = new Set([
+  "2025-01-01","2025-01-20","2025-02-17","2025-04-18","2025-05-26","2025-06-19","2025-07-04","2025-09-01","2025-11-27","2025-12-25",
+  "2026-01-01","2026-01-19","2026-02-16","2026-04-03","2026-05-25","2026-06-19","2026-07-03","2026-09-07","2026-11-26","2026-12-25",
+]);
+
+export const isMarketDay = (dateKey) => {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  const day = d.getUTCDay();
+  if (day === 0 || day === 6) return false;
+  return !US_MKT_HOLIDAYS.has(dateKey);
+};
+
+export const previousTradingDay = (dateKey) => {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  let guard = 0;
+  do { d.setUTCDate(d.getUTCDate() - 1); guard++; } while (!isMarketDay(d.toISOString().slice(0, 10)) && guard < 10);
   return d.toISOString().slice(0, 10);
+};
+
+export const previousDateKey = (dateKey) => {
+  return previousTradingDay(dateKey);
 };
 
 export const isLocalMidnight = (date = new Date(), tz = SITE_TIMEZONE) => {
