@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
 
 const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
@@ -70,9 +70,14 @@ const FB = {
   hyper:{ticker:"NVDA",company:"NVIDIA Corporation",exchange:"NASDAQ",price:728.50,change_pct:3.8,market_cap:"1.82T",avg_volume:"42M",relative_volume:1.8,atr_pct:3.2,float_val:"2.4B",short_interest:"1.2%",gap_pct:1.9,premarket_vol:"6.1M",hirsch_score:91,thesis_summary:"All major hyperscalers guided AI capex higher — unanimously bullish through 2026|Blackwell architecture demand exceeding supply by estimated 3-4x ratio|Cloud concentration risk offset by emerging sovereign AI demand vector|Weekly chart maintains higher lows — technical momentum fully intact",catalysts:"NVIDIA continues benefiting from unprecedented AI infrastructure demand. All major hyperscalers (Microsoft, Google, Amazon, Meta) guided capex higher in recent earnings calls, directly supporting NVIDIA's revenue trajectory.\n\nBlackwell GPU demand far exceeds supply capacity. Management commentary suggests supply constraints persist through at least mid-2026, supporting pricing power and forward visibility.",upside_drivers:"Convergence of hyperscaler capex expansion, Blackwell demand, and sovereign AI spending creates multiple independent demand vectors. Any positive supply chain development or major new customer announcement could catalyze the next significant leg higher.",key_levels:"Support at $695 (20-day MA). Psychological resistance at $750. Breakout target $800+ on sustained institutional volume.",risks:"Customer concentration — top hyperscalers represent significant revenue share|Regulatory risk from potential export control expansion|Premium valuation requires sustained growth execution|Competitive threats from custom silicon (TPU, Trainium, etc.)",invalidation:"Price breaks below $695 on heavy institutional volume|Any major hyperscaler guides capex lower|Export control expansion announced targeting AI chips|Blackwell yield or production issues surface",signal_values:"+35% YoY capex|+122% YoY|1.8x index|Moderate|Low beta|9.5/10|42x fwd",signal_weights:"22|20|12|8|10|18|10",signal_reasons:"Hyperscaler capex directly drives NVIDIA revenue growth|Cloud revenue acceleration sustains premium valuation|Index fund flows remain supportive of price|Regulatory environment currently manageable|Demonstrated macro resilience through rate cycles|Near-impenetrable competitive moat in AI training|Earnings power ratio supports current multiple",what_it_is:"NVIDIA is the dominant designer of GPUs and AI accelerators powering the global buildout of data centers, AI training infrastructure, gaming, and autonomous systems."},
 };
 
-const isMktOpen = (dt) => { const day = dt.getDay(); return day !== 0 && day !== 6; };
-const mktDay = (from = new Date()) => { const dt = new Date(from); while (!isMktOpen(dt)) dt.setDate(dt.getDate() - 1); return dt; };
-const recentMktDays = (count, from = new Date()) => { const days = []; const cursor = mktDay(from); while (days.length < count) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate() - 1); while (!isMktOpen(cursor)) cursor.setDate(cursor.getDate() - 1); } return days; };
+const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+const US_HOLIDAYS = new Set([
+  "2025-01-01","2025-01-20","2025-02-17","2025-04-18","2025-05-26","2025-06-19","2025-07-04","2025-09-01","2025-11-27","2025-12-25",
+  "2026-01-01","2026-01-19","2026-02-16","2026-04-03","2026-05-25","2026-06-19","2026-07-03","2026-09-07","2026-11-26","2026-12-25",
+]);
+const isMktOpen = (dt) => { const day = dt.getDay(); if (day === 0 || day === 6) return false; return !US_HOLIDAYS.has(ymd(dt)); };
+const mktDay = (from = new Date()) => { const dt = new Date(from); let guard = 0; while (!isMktOpen(dt) && guard++ < 10) dt.setDate(dt.getDate() - 1); return dt; };
+const recentMktDays = (count, from = new Date()) => { const days = []; const cursor = mktDay(from); let guard = 0; while (days.length < count && guard++ < count + 60) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate() - 1); while (!isMktOpen(cursor) && guard++ < count + 60) cursor.setDate(cursor.getDate() - 1); } return days; };
 const fD = (dt) => dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const LIVE_DAY = mktDay();
 const HIST_MKT = Object.fromEntries(Object.entries(HIST).map(([id, rows]) => { const dts = recentMktDays(rows.length); return [id, rows.map((row, i) => ({ ...row, d: fD(dts[i]) }))]; }));
@@ -81,7 +86,6 @@ const gP = (b, n, v = .03) => { const d = []; let p = b; const dts = recentMktDa
 const gI = (o) => { const d = []; let p = o; for (let i = 0; i < 78; i++) { const h = 9 + Math.floor((i * 5 + 30) / 60), m = (i * 5 + 30) % 60; p = Math.max(o * .85, p + (Math.random() - .42) * .015 * p); d.push({ time: `${h}:${m.toString().padStart(2, "0")}`, price: +p.toFixed(2), volume: Math.floor(Math.random() * 5e5 + 1e5), vwap: +(p * (.98 + Math.random() * .04)).toFixed(2) }); } return d; };
 const TF_CFG = {"1D": { range: "1d", interval: "5m" }, "5D": { range: "5d", interval: "30m" }, "1M": { range: "1mo", interval: "1d" }, "6M": { range: "6mo", interval: "1d" }, "1Y": { range: "1y", interval: "1d" }};
 const fmtTime = (dt) => dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 const mktKeySet = (count = 370) => new Set(recentMktDays(count).map(ymd));
 
 const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
@@ -103,6 +107,21 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,
 .cb.on{background:#fff;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 @media(max-width:768px){.dn{display:none!important}.mb{display:flex!important}.mg{grid-template-columns:repeat(2,1fr)!important}}`;
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) return (
+      <div style={{ padding: 40, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
+        <h2 style={{ marginBottom: 12 }}>Something went wrong</h2>
+        <p style={{ color: "#6B7280", marginBottom: 20 }}>The page encountered an error. Please try refreshing.</p>
+        <button onClick={() => { this.setState({ hasError: false }); window.location.reload(); }} style={{ background: "#0066FF", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>Refresh Page</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [pg, setPg] = useState(() => pageFromPath());
   const [ac, setAc] = useState("penny");
@@ -111,6 +130,7 @@ export default function App() {
   const [ld2, setLd] = useState(null);
   const [tf, setTf] = useState("1D");
   const [sc, setSc] = useState(false);
+  const [dataStatus, setDataStatus] = useState({});
   const [mm, setMm] = useState(false);
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
@@ -138,6 +158,7 @@ export default function App() {
       const out = {};
       let price = null;
       let prevClose = null;
+      let lastTs = null;
       for (const t of tfs) {
         const mk = await fetchMarket(ticker, t);
         const pts = toChartPoints(mk.points);
@@ -146,15 +167,20 @@ export default function App() {
           const last = mk.points?.[mk.points.length - 1];
           price = Number(last?.close ?? mk.meta?.regularMarketPrice ?? price);
           prevClose = Number(mk.meta?.chartPreviousClose ?? mk.meta?.previousClose ?? prevClose);
+          if (last?.ts) lastTs = last.ts * 1000;
         }
       }
       setCh(p => ({ ...p, [id]: out }));
+      const isStale = lastTs ? (Date.now() - lastTs) > 48 * 60 * 60 * 1000 : true;
+      const hasData = Object.values(out).some(pts => pts.length > 0);
+      setDataStatus(p => ({ ...p, [id]: hasData ? (isStale ? "delayed" : "live") : "offline" }));
       if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) {
         const change_pct = +(((price - prevClose) / prevClose) * 100).toFixed(2);
         setP(p => ({ ...p, [id]: { ...(p[id] || FB[id]), ticker, price: +price.toFixed(2), change_pct } }));
       }
       return true;
     } catch {
+      setDataStatus(p => ({ ...p, [id]: "offline" }));
       setCh(p => ({...p,[id]:{"1D":gI(bp),"5D":gP(bp,5,v),"1M":gP(bp,30,v*.8),"6M":gP(bp,180,v*.6),"1Y":gP(bp,365,v*.5)}}));
       return false;
     }
@@ -207,7 +233,13 @@ export default function App() {
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
   const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[]; const isLd = ld2===ac&&!pk;
 
+  const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
+  const DataBadge = () => {
+    const cfg = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Loading..." } };
+    const c = cfg[ds] || cfg.loading;
+    return (<span className="fs" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, background: c.bg, color: c.color }}>{ds === "live" && <span className="ld" style={{ width: 6, height: 6 }} />}{c.text}</span>);
+  };
   const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
 
   const TT = ({data,limit}) => (<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} className="fs"><thead><tr style={{borderBottom:"2px solid var(--bd)"}}>{["Date","Ticker","Entry","Close","High","Low","Return","Max Run","Score"].map(h=>(<th key={h} style={{padding:"10px",textAlign:"left",fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em"}}>{h}</th>))}</tr></thead><tbody>{(data||[]).slice(0,limit||999).map((p,i)=>{const retNum=pctRet(p.e,p.c);const mrNum=pctRet(p.e,p.h);const ret=retNum.toFixed(1);const mr=mrNum.toFixed(1);return(<tr key={i} style={{borderBottom:"1px solid var(--bd)"}} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><td style={{padding:"11px 10px",fontSize:13,color:"var(--mu)"}}>{p.d}</td><td style={{padding:"11px 10px",fontSize:14,fontWeight:700}}>{p.t}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.e||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.c||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--gn)"}}>${Number(p.h||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--rd)"}}>${Number(p.l||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:retNum>=0?"var(--gn)":"var(--rd)"}}>{retNum>=0?"+":""}{ret}%</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:mrNum>=0?"var(--gn)":"var(--rd)"}}>{mrNum>=0?"+":""}{mr}%</td><td style={{padding:"11px 10px"}}><span style={{background:p.s>=80?"var(--gl)":"var(--al)",color:p.s>=80?"var(--gn)":"var(--ac)",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{p.s}</span></td></tr>);})}</tbody></table></div>);
@@ -233,9 +265,15 @@ export default function App() {
   const Home = () => (<div>
     <div style={{background:"linear-gradient(180deg,#0C0F14 0%,#161B26 65%,var(--bg) 100%)",padding:"150px 24px 100px",textAlign:"center"}}>
       <div style={{maxWidth:820,margin:"0 auto"}}>
-        <div className="afu" style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(0,196,140,.1)",border:"1px solid rgba(0,196,140,.2)",borderRadius:100,padding:"6px 16px",marginBottom:28}}>
-          <span className="ld"/><span style={{color:"var(--gn)",fontSize:13,fontWeight:500}} className="fs">Market Open — 5 Categories Live</span>
-        </div>
+        {isMktOpen(new Date()) ? (
+          <div className="afu" style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(0,196,140,.1)",border:"1px solid rgba(0,196,140,.2)",borderRadius:100,padding:"6px 16px",marginBottom:28}}>
+            <span className="ld"/><span style={{color:"var(--gn)",fontSize:13,fontWeight:500}} className="fs">Market Open — 5 Categories Live</span>
+          </div>
+        ) : (
+          <div className="afu" style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.2)",borderRadius:100,padding:"6px 16px",marginBottom:28}}>
+            <span style={{color:"var(--am)",fontSize:13,fontWeight:500}} className="fs">Market Closed — Showing Last Trading Day</span>
+          </div>
+        )}
         <h1 className="ff afu d1" style={{fontSize:"clamp(40px,7vw,68px)",color:"#fff",lineHeight:1.05,letterSpacing:"-.03em",marginBottom:20}}>Daily Volatility<br/><em style={{color:"var(--gn)"}}>Picks</em></h1>
         <p className="fs afu d2" style={{fontSize:17,color:"#9CA3AF",maxWidth:560,margin:"0 auto 36px",lineHeight:1.7}}>Algorithm-driven stock picks across five market cap tiers — from penny stocks to hyperscalers. Deep reasoning, full transparency.</p>
         <div className="afu d3" style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
@@ -278,7 +316,7 @@ export default function App() {
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
       <Tabs s={{marginBottom:28}}/>
       <div className="afu">
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span><DataBadge/></div>
         <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}><h1 className="ff" style={{fontSize:"clamp(34px,5vw,50px)",letterSpacing:"-.03em"}}>{pk.ticker}</h1><span className="fs" style={{fontSize:15,color:"var(--mu)"}}>{pk.company} · {pk.exchange}</span></div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>{[cat.label,"High Volatility","Educational Only"].map(b=>(<span key={b} className="fs" style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:6,background:b.includes("Vol")?"var(--rl)":b.includes("Edu")?"var(--aml)":"var(--al)",color:b.includes("Vol")?"var(--rd)":b.includes("Edu")?"#92400E":cat.color,textTransform:"uppercase",letterSpacing:".05em"}}>{b}</span>))}</div>
       </div>
@@ -399,10 +437,10 @@ export default function App() {
     </div>
   </footer>);
 
-  return(<div className="fs" style={{background:"var(--bg)",minHeight:"100vh",color:"var(--tx)"}}>
+  return(<ErrorBoundary><div className="fs" style={{background:"var(--bg)",minHeight:"100vh",color:"var(--tx)"}}>
     <style>{CSS}</style><Nav/>
     {pg==="home"&&<Home/>}{pg==="pick"&&<Pick/>}{pg==="track"&&<Track/>}{pg==="method"&&<Method/>}{pg==="about"&&<About/>}
     <Foot/>
     {ld2&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--dk)",color:"#fff",padding:"12px 20px",borderRadius:12,display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,.3)"}}><div style={{width:14,height:14,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"#fff",borderRadius:"50%",animation:"sp .8s linear infinite"}}/><span className="fs" style={{fontSize:13}}>Generating {CATS.find(c=>c.id===ld2)?.label} pick...</span></div>}
-  </div>);
+  </div></ErrorBoundary>);
 }

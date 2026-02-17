@@ -1,5 +1,5 @@
 import { generateDailyPicks } from '../_lib/generate.js';
-import { isLocalMidnight, todayKey } from '../_lib/date.js';
+import { isLocalMidnight, todayKey, isMarketDay } from '../_lib/date.js';
 
 export default async function handler(req, res) {
   try {
@@ -8,7 +8,10 @@ export default async function handler(req, res) {
 
     if (!isLocalMidnight()) return res.status(200).json({ ok: true, skipped: true, reason: 'Not local midnight window' });
 
-    const data = await generateDailyPicks(todayKey());
+    const key = todayKey();
+    if (!isMarketDay(key)) return res.status(200).json({ ok: true, skipped: true, reason: `Market closed on ${key}` });
+
+    const data = await generateDailyPicks(key);
     res.status(200).json({ ok: true, date: data.date, generated: true });
   } catch (e) {
     res.status(500).json({ error: 'Cron failed', detail: String(e?.message || e) });
