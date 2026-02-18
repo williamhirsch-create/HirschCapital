@@ -1,7 +1,7 @@
 import { CANDIDATES, CATEGORIES, SITE_TIMEZONE, SIGNAL_LABELS, SIGNAL_WEIGHTS, ALGO_VERSION } from './constants.js';
 import { fetchChart, fetchQuotes, computeMetrics } from './market.js';
 import { getStore, setStore, upsertTrackRow } from './store.js';
-import { previousDateKey } from './date.js';
+import { previousDateKey, getNowInTzParts } from './date.js';
 
 const toDate = (ts, tz = SITE_TIMEZONE) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts * 1000));
 
@@ -222,7 +222,9 @@ const selectTopPick = async (categoryId, dateKey) => {
       company: fallback?.company || 'Data unavailable',
       exchange: fallback?.exchange || 'N/A',
       price: 0, change_pct: 0, market_cap: 'N/A', avg_volume: 'N/A',
-      hirsch_score: 0, date: dateKey, category: categoryId,
+      relative_volume: 0, atr_pct: 0, float_val: 'N/A', short_interest: 'N/A',
+      gap_pct: 0, premarket_vol: 'N/A',
+      hirsch_score: 0, score: 0, date: dateKey, category: categoryId,
       thesis_summary: 'Live data unavailable — could not generate pick for this category',
       catalysts: 'Market data feed returned no results for candidates in this category.',
       upside_drivers: 'N/A', key_levels: 'N/A', risks: 'No data available', invalidation: 'N/A',
@@ -230,6 +232,8 @@ const selectTopPick = async (categoryId, dateKey) => {
       signal_values: 'N/A|N/A|N/A|N/A|N/A|N/A|N/A',
       signal_weights: (SIGNAL_WEIGHTS[categoryId] || []).join('|'),
       signal_reasons: 'Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable|Data unavailable',
+      signals_json: {},
+      thesis_json: { summary: '' },
       created_at: new Date().toISOString(),
       chosen_timestamp: new Date().toISOString(),
       reference_price: 0,
@@ -329,10 +333,26 @@ export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
   store.daily_picks ||= {};
   store.track_record ||= [];
 
-  // Return cached picks only if same algorithm version AND picks have real data
+  // Return cached picks only if same algorithm version, picks have real data, AND not stale
   const cached = store.daily_picks[dateKey];
   const cachedHasRealData = cached && Object.values(cached.picks || {}).some(p => p.hirsch_score > 0);
-  if (!force && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
+
+  // Auto-refresh stale picks: if today's picks were generated before 8:30 AM ET
+  // and it's now past 8:30 AM, regenerate with fresh pre-market data.
+  // This ensures picks always update even if the scheduled cron job fails.
+  let stale = false;
+  if (!force && cachedHasRealData && cached?.created_at) {
+    const now = getNowInTzParts();
+    const nowMins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
+    const todayStr = `${now.year}-${now.month}-${now.day}`;
+    if (dateKey === todayStr && nowMins >= 510) { // 510 = 8:30 AM
+      const created = getNowInTzParts(new Date(cached.created_at));
+      const createdMins = parseInt(created.hour, 10) * 60 + parseInt(created.minute, 10);
+      if (createdMins < 510) stale = true;
+    }
+  }
+
+  if (!force && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
   // Build track record from previous day's picks
   const prevKey = previousDateKey(dateKey);
