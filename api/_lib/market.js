@@ -49,7 +49,7 @@ export const fetchQuotes = async (symbols) => {
   try {
     const r = await yfFetch('/v7/finance/quote', {
       symbols: symbols.join(','),
-      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,sharesOutstanding,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
     });
     const raw = await r.json();
     return raw?.quoteResponse?.result || null;
@@ -145,8 +145,12 @@ export const computeMetrics = (chart, quote = null) => {
       : price;
   const price_vs_ma = ma50 > 0 ? +(((price - ma50) / ma50) * 100).toFixed(1) : 0;
 
-  // Market cap (from quote or null)
-  const marketCap = quote?.marketCap || null;
+  // Market cap: prefer computed (shares outstanding × live price) over Yahoo's stale marketCap field
+  const sharesOut = quote?.sharesOutstanding;
+  const computedCap = Number.isFinite(sharesOut) && sharesOut > 0 && Number.isFinite(price) && price > 0
+    ? Math.round(sharesOut * price)
+    : null;
+  const marketCap = computedCap || quote?.marketCap || null;
 
   // Change %
   const change_pct = quote?.regularMarketChangePercent
