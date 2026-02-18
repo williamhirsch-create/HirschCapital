@@ -196,6 +196,8 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,
 @keyframes sp{to{transform:rotate(360deg)}}
 @keyframes pu{0%,100%{opacity:1}50%{opacity:.5}}
 @keyframes sh{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes pbSlide{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.pb{background:linear-gradient(90deg,var(--ac) 0%,#4d94ff 40%,var(--ac) 80%);background-size:200% 100%;animation:pbSlide 1.8s ease infinite;border-radius:2px}
 .afu{animation:fu .6s ease forwards}.asi{animation:si .5s ease forwards}
 .d1{animation-delay:.1s;opacity:0}.d2{animation-delay:.2s;opacity:0}.d3{animation-delay:.3s;opacity:0}.d4{animation-delay:.4s;opacity:0}
 .sk{background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:sh 1.5s infinite;border-radius:8px}
@@ -246,11 +248,15 @@ export default function App() {
     return rs.json();
   };
 
+  const quoteCacheRef = useRef({});
   const fetchQuote = async (ticker) => {
+    if (quoteCacheRef.current[ticker]) return quoteCacheRef.current[ticker];
     try {
       const rs = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
       if (!rs.ok) return null;
-      return rs.json();
+      const data = await rs.json();
+      if (data) quoteCacheRef.current[ticker] = data;
+      return data;
     } catch { return null; }
   };
 
@@ -433,14 +439,19 @@ export default function App() {
     return true;
   };
 
-  /** Fetch Google Finance data for a ticker */
+  /** Fetch Google Finance data for a ticker (cached to avoid redundant requests) */
+  const gfCacheRef = useRef({});
   const fetchGFinance = async (ticker, exchange) => {
+    const key = `${ticker}_${exchange||''}`;
+    if (gfCacheRef.current[key]) return gfCacheRef.current[key];
     try {
       let url = `/api/gfinance?symbol=${encodeURIComponent(ticker)}`;
       if (exchange) url += `&exchange=${encodeURIComponent(exchange)}`;
       const rs = await fetch(url);
       if (!rs.ok) return null;
-      return rs.json();
+      const data = await rs.json();
+      if (data) gfCacheRef.current[key] = data;
+      return data;
     } catch { return null; }
   };
 
@@ -487,10 +498,12 @@ export default function App() {
     return enriched;
   };
 
-  /** Master preload: fetch all picks, enrich with quotes, load all charts — then mark ready */
+  /** Master preload: fetch all picks, enrich + load charts per category, update UI as each completes */
   const preloadAllData = async () => {
     const catIds = CATS.map(c => c.id);
-    const totalSteps = 1 + catIds.length + catIds.length; // api + quotes + charts
+    // Prioritize the currently active category so it gets live data first
+    const sortedIds = [ac, ...catIds.filter(id => id !== ac)];
+    const totalSteps = 1 + sortedIds.length * 2; // api + (enrich + charts) per category
     let done = 0;
     const progress = (step) => { done++; setPreloadProgress({ step, done, total: totalSteps }); };
 
@@ -507,59 +520,46 @@ export default function App() {
     }
     progress("Picks loaded");
 
-    // Step 2: Enrich each category's pick with live quote data (parallel)
+    // Step 2: For each category (active first), enrich + load charts, then update UI immediately
     const enrichedPicks = {};
-    await Promise.all(catIds.map(async (id) => {
+
+    const processCategory = async (id) => {
       let pick = apiData?.picks?.[id] || STATIC_PICKS[id];
       pick = await enrichPickWithQuote(pick);
+
+      // Validate metric fields
+      for (const field of ['market_cap', 'avg_volume', 'float_val', 'short_interest', 'premarket_vol']) {
+        if (!isValidMetricValue(pick[field])) pick[field] = 'N/A';
+      }
+      for (const field of ['relative_volume', 'atr_pct', 'gap_pct']) {
+        if (!Number.isFinite(pick[field])) pick[field] = 0;
+      }
       enrichedPicks[id] = pick;
       progress(`${pick.ticker} quote loaded`);
-    }));
 
-    // Double-check: validate all metric fields — use "N/A" for missing data, never borrow from static picks of a different ticker
-    for (const id of catIds) {
-      const ep = enrichedPicks[id];
-      if (!ep) continue;
-      // Ensure string metric fields are valid short numeric values, not description text
-      for (const field of ['market_cap', 'avg_volume', 'float_val', 'short_interest', 'premarket_vol']) {
-        if (!isValidMetricValue(ep[field])) {
-          ep[field] = 'N/A';
-        }
-      }
-      // Ensure numeric metric fields are actual finite numbers
-      for (const field of ['relative_volume', 'atr_pct', 'gap_pct']) {
-        if (!Number.isFinite(ep[field])) {
-          ep[field] = 0;
-        }
-      }
-      enrichedPicks[id] = ep;
-    }
-
-    // Set all picks at once so the UI can start rendering what we have
-    setP({ ...enrichedPicks });
-
-    // Step 3: Load charts for all categories in parallel
-    const allCharts = {};
-    const allStatus = {};
-    await Promise.all(catIds.map(async (id) => {
-      const pick = enrichedPicks[id];
+      // Load charts (quote is already cached from enrichment, so no redundant fetch)
       const ticker = pick?.ticker || STATIC_PICKS[id].ticker;
       const bp = id==="penny"?1+Math.random()*3:id==="small"?10+Math.random()*35:id==="mid"?40+Math.random()*100:id==="large"?80+Math.random()*300:150+Math.random()*600;
       const v = id==="penny"?.05:id==="small"?.035:.02;
       const result = await loadChartsForCategory(id, ticker, bp, v);
-      allCharts[id] = result.charts;
-      allStatus[id] = result.status;
-      // Override with live chart-computed metrics + fresh quote data so displayed values match actual data
+
+      // Merge chart-computed metrics
       if (result.priceUpdate && Number.isFinite(result.priceUpdate.price) && result.priceUpdate.price > 0) {
         enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
       }
-      progress(`${ticker} charts loaded`);
-    }));
 
-    // Set all charts and status at once
-    setCh(allCharts);
-    setDataStatus(allStatus);
-    setP({ ...enrichedPicks });
+      // Update this category's UI immediately — don't wait for other categories
+      setCh(prev => ({ ...prev, [id]: result.charts }));
+      setDataStatus(prev => ({ ...prev, [id]: result.status }));
+      setP(prev => ({ ...prev, [id]: enrichedPicks[id] }));
+      progress(`${ticker} ready`);
+    };
+
+    // Process active category first, then remaining in parallel
+    await processCategory(sortedIds[0]);
+    if (sortedIds.length > 1) {
+      await Promise.all(sortedIds.slice(1).map(processCategory));
+    }
 
     // Load track records in background (not blocking page render)
     catIds.forEach(id => loadTrackLive(id));
@@ -729,9 +729,23 @@ export default function App() {
         </div>
       </div>
 
-      {/* METRICS — skeleton bars shown while live data loads; values shown once live/delayed/offline */}
-      <div className="afu d2 mg" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:18}}>
-        {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";const loading=ds==="static"||ds==="loading";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div>{loading?<div className="sk" style={{height:18,width:"65%",marginTop:4,borderRadius:4}}/>:<div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div>}</div>);})}
+      {/* METRICS — progress bar while live data loads; values shown once live/delayed/offline */}
+      <div style={{marginTop:18}}>
+        {(ds==="static"||ds==="loading") && (
+          <div className="afu d2" style={{background:"var(--cd)",borderRadius:14,padding:"16px 20px",border:"1px solid var(--bd)",marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <div className="fs" style={{fontSize:12,fontWeight:600,color:"var(--tx)",letterSpacing:".02em"}}>Loading live market data</div>
+              <div className="fs" style={{fontSize:12,fontWeight:700,color:"var(--ac)"}}>{Math.round((preloadProgress.done/Math.max(1,preloadProgress.total))*100)}%</div>
+            </div>
+            <div style={{height:6,background:"var(--bd)",borderRadius:3,overflow:"hidden",marginBottom:8}}>
+              <div className="pb" style={{height:"100%",width:`${Math.max(5,Math.round((preloadProgress.done/Math.max(1,preloadProgress.total))*100))}%`,transition:"width .4s ease"}}/>
+            </div>
+            <div className="fs" style={{fontSize:11,color:"var(--mu)"}}>{preloadProgress.step||"Connecting to market data..."}</div>
+          </div>
+        )}
+        <div className={"afu d2 mg"} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
+          {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";const isLoading=ds==="static"||ds==="loading";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div>{isLoading?<div style={{height:18,display:"flex",alignItems:"center",marginTop:4}}><div className="pb" style={{height:3,width:"100%"}}/></div>:<div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div>}</div>);})}
+        </div>
       </div>
 
       {/* HIRSCH SCORE */}
