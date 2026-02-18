@@ -92,8 +92,14 @@ export default async function handler(req, res) {
     const isNumericMetric = (v) => {
       if (!v) return false;
       const s = String(v).trim();
-      if (s.length > 20) return false;  // Reject long description text
-      return /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(s);
+      if (s.length > 30) return false;  // Reject long description text
+      return /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?(\s*[A-Z]{3})?$/i.test(s);
+    };
+
+    /** Clean a raw metric value — strip currency suffixes like "USD", trim whitespace */
+    const cleanMetric = (v) => {
+      if (!v) return null;
+      return v.trim().replace(/\s+(USD|EUR|GBP|JPY|CAD|AUD)$/i, '').trim();
     };
 
     // Extract key-value pairs from the stats section
@@ -101,26 +107,53 @@ export default async function handler(req, res) {
     const extractStat = (label) => {
       // Try multiple patterns Google Finance uses
       const patterns = [
+        // Standard: >Market cap</div>...<div>2.42T USD<
         new RegExp(`>${label}</div>[^<]*<div[^>]*>([^<]+)<`, 'i'),
+        // Span variant: >Market cap</span>...<span>2.42T<
+        new RegExp(`>${label}</span>[^<]*<[^>]*>([^<]+)<`, 'i'),
+        // Table variant
         new RegExp(`>${label}</td>[^<]*<td[^>]*>([^<]+)<`, 'i'),
+        // JSON-LD or embedded data
         new RegExp(`"${label}"[^}]*"value"\\s*:\\s*"([^"]+)"`, 'i'),
+        // Generic: label in any tag, value in next tag
         new RegExp(`>${label}<[^>]*>[^<]*<[^>]*>([^<]+)<`, 'i'),
+        // Nested structure: label in one div, value in a deeply nested sibling
+        new RegExp(`>${label}</div>(?:<[^>]*>|\\s)*?([\\$]?[\\d.,]+\\s*[BKMT]?(?:\\s*[A-Z]{3})?)\\s*<`, 'i'),
         // More aggressive: look for label text near a value
-        new RegExp(`${label}[\\s\\S]{0,200}?>(\\$?[\\d.,]+[BKMT]?%?)<`, 'i'),
+        new RegExp(`${label}[\\s\\S]{0,300}?>(\\$?[\\d.,]+\\s*[BKMT]?(?:\\s*[A-Z]{3})?)\\s*<`, 'i'),
       ];
       for (const pat of patterns) {
         const m = html.match(pat);
         if (m && m[1]) {
           const val = fmtVal(m[1]);
           // Only accept values that look like short numeric metrics, reject description text
-          if (isNumericMetric(val)) return val;
+          if (isNumericMetric(val)) return cleanMetric(val);
         }
       }
       return null;
     };
 
-    // Market cap
-    const mcRaw = extractStat('Market cap');
+    // Market cap — try dedicated extraction first, then generic extractStat
+    let mcRaw = null;
+
+    // Google Finance often puts market cap in a specific data structure with class-based selectors
+    // Try targeted patterns for market cap value near the label
+    const mcPatterns = [
+      /Market cap<\/div>(?:<[^>]*>|\s)*?([\d.,]+\s*[BKMT]\s*(?:USD)?)\s*</i,
+      /Market cap<\/span>(?:<[^>]*>|\s)*?([\d.,]+\s*[BKMT]\s*(?:USD)?)\s*</i,
+      /Market cap[\s\S]{0,500}?class="[^"]*YMlKec[^"]*"[^>]*>([\d.,]+\s*[BKMT](?:\s*USD)?)\s*</i,
+      /Market cap[\s\S]{0,500}?class="[^"]*P6K39c[^"]*"[\s\S]{0,200}?([\d.,]+\s*[BKMT](?:\s*USD)?)\s*</i,
+    ];
+    for (const pat of mcPatterns) {
+      const m = html.match(pat);
+      if (m && m[1]) {
+        const val = cleanMetric(fmtVal(m[1]));
+        if (val && isNumericMetric(val)) { mcRaw = val; break; }
+      }
+    }
+
+    // Fallback to generic extraction
+    if (!mcRaw) mcRaw = extractStat('Market cap');
     if (mcRaw) result.market_cap = mcRaw;
 
     // Average volume

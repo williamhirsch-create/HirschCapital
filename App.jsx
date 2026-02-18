@@ -476,7 +476,7 @@ export default function App() {
       enriched.change_pct = q.change_pct ?? enriched.change_pct;
     }
 
-    // Market cap: prefer Google Finance, fall back to Yahoo — only accept valid short numeric strings
+    // Market cap: prefer Google Finance, fall back to Yahoo (now computed from shares outstanding × price)
     if (isValidMetricValue(gf?.market_cap)) enriched.market_cap = gf.market_cap;
     else if (isValidMetricValue(q?.market_cap)) enriched.market_cap = q.market_cap;
 

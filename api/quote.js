@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
     const qs = new URLSearchParams({
       symbols: symbol,
-      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,sharesOutstanding,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
     }).toString();
 
     let upstream = null;
@@ -47,8 +47,16 @@ export default async function handler(req, res) {
     const shortPct = q.shortPercentOfFloat;
     const pmVol = q.preMarketVolume;
 
+    // Compute market cap from shares outstanding × live price (more accurate than Yahoo's stale marketCap field)
+    const sharesOut = q.sharesOutstanding;
+    const livePrice = q.regularMarketPrice;
+    const computedCap = Number.isFinite(sharesOut) && sharesOut > 0 && Number.isFinite(livePrice) && livePrice > 0
+      ? Math.round(sharesOut * livePrice)
+      : null;
+    const bestCap = computedCap || q.marketCap;
+
     // Build response with validated numeric fields
-    const capStr = fmtCap(q.marketCap);
+    const capStr = fmtCap(bestCap);
     const avgVolStr = q.averageDailyVolume3Month ? fmtVol(q.averageDailyVolume3Month) : null;
     const floatStr = Number.isFinite(floatShares) && floatShares > 0
       ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
@@ -74,7 +82,7 @@ export default async function handler(req, res) {
       // Raw numeric values for frontend metric computation
       _raw_market_volume: q.regularMarketVolume || null,
       _raw_avg_volume_3m: q.averageDailyVolume3Month || null,
-      _raw_market_cap: q.marketCap || null,
+      _raw_market_cap: bestCap || null,
     });
   } catch (err) {
     return res.status(500).json({ error: 'Unexpected quote proxy error.', detail: String(err?.message || err) });
