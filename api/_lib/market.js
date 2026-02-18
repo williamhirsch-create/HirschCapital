@@ -49,7 +49,15 @@ export const fetchQuotes = async (symbols) => {
   try {
     const r = await yfFetch('/v7/finance/quote', {
       symbols: symbols.join(','),
-      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,sharesOutstanding,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+      fields: [
+        'symbol','regularMarketPrice','regularMarketChangePercent','regularMarketVolume',
+        'regularMarketPreviousClose','regularMarketOpen','marketCap','sharesOutstanding',
+        'averageDailyVolume3Month','averageDailyVolume10Day','floatShares',
+        'shortPercentOfFloat','sharesShort','shortRatio',
+        'preMarketVolume','preMarketPrice','preMarketChange','preMarketChangePercent',
+        'fiftyTwoWeekHigh','fiftyTwoWeekLow',
+        'longName','shortName','exchangeName',
+      ].join(','),
     });
     const raw = await r.json();
     return raw?.quoteResponse?.result || null;
@@ -106,16 +114,21 @@ export const computeMetrics = (chart, quote = null) => {
   const atr = computeATR(points);
   const atr_pct = price > 0 ? +((atr / price) * 100).toFixed(1) : 0;
 
-  // Relative volume
+  // Relative volume: prefer Yahoo's 3-month average (most stable), then 10-day, then chart-based
   const volumes = points.map(p => p.volume).filter(Number.isFinite);
-  const avgVol = quote?.averageDailyVolume3Month
-    || (volumes.length > 1 ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1) : 1);
+  const chartAvgVol = volumes.length > 1 ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1) : 1;
+  const avgVol = quote?.averageDailyVolume3Month || quote?.averageDailyVolume10Day || chartAvgVol;
   const todayVol = quote?.regularMarketVolume ?? latest.volume ?? 0;
   const relative_volume = avgVol > 0 ? +(todayVol / avgVol).toFixed(1) : 1;
 
-  // Gap %
-  const prevClose = Number(prev?.close ?? quote?.regularMarketPreviousClose ?? price);
-  const todayOpen = Number(latest.open ?? price);
+  // Also compute 10-day relative volume for a more responsive reading
+  const avgVol10d = quote?.averageDailyVolume10Day;
+  const relative_volume_10d = Number.isFinite(avgVol10d) && avgVol10d > 0
+    ? +(todayVol / avgVol10d).toFixed(1) : null;
+
+  // Gap %: prefer Yahoo's regularMarketOpen (most accurate), then chart's open
+  const prevClose = Number(quote?.regularMarketPreviousClose ?? prev?.close ?? price);
+  const todayOpen = Number(quote?.regularMarketOpen ?? latest.open ?? price);
   const gap_pct = prevClose > 0 ? +(((todayOpen - prevClose) / prevClose) * 100).toFixed(1) : 0;
 
   // 5D momentum
@@ -171,8 +184,11 @@ export const computeMetrics = (chart, quote = null) => {
     ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
     : null;
 
-  // Short interest from Yahoo quote
-  const shortPct = quote?.shortPercentOfFloat;
+  // Short interest: prefer shortPercentOfFloat, cross-validate with sharesShort / floatShares
+  let shortPct = quote?.shortPercentOfFloat;
+  if ((!Number.isFinite(shortPct) || shortPct <= 0) && Number.isFinite(quote?.sharesShort) && quote.sharesShort > 0 && Number.isFinite(floatShares) && floatShares > 0) {
+    shortPct = quote.sharesShort / floatShares;
+  }
   const short_interest = Number.isFinite(shortPct) && shortPct > 0
     ? `${(shortPct * 100).toFixed(1)}%`
     : null;
@@ -186,10 +202,12 @@ export const computeMetrics = (chart, quote = null) => {
   return {
     price: +price.toFixed(2),
     prevClose: +prevClose.toFixed(2),
+    todayOpen: +todayOpen.toFixed(2),
     change_pct: +Number(change_pct).toFixed(1),
     marketCap,
     atr_pct,
     relative_volume,
+    relative_volume_10d,
     gap_pct,
     momentum_5d,
     momentum_20d,
@@ -206,5 +224,8 @@ export const computeMetrics = (chart, quote = null) => {
     float_val,
     short_interest,
     premarket_vol,
+    // Raw values for frontend cross-validation
+    _raw_avg_volume_10d: avgVol10d || null,
+    _raw_short_ratio: quote?.shortRatio || null,
   };
 };

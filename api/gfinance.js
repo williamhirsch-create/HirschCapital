@@ -156,9 +156,25 @@ export default async function handler(req, res) {
     if (!mcRaw) mcRaw = extractStat('Market cap');
     if (mcRaw) result.market_cap = mcRaw;
 
-    // Average volume
-    const avgVolRaw = extractStat('Avg Volume') || extractStat('Average volume');
+    // Average volume — try multiple label variants used by Google Finance
+    const avgVolRaw = extractStat('Avg Volume') || extractStat('Average volume') || extractStat('Avg volume');
     if (avgVolRaw) result.avg_volume = avgVolRaw;
+
+    // Today's volume
+    const volRaw = extractStat('Volume') || extractStat('Today.s volume');
+    if (volRaw) result.volume = volRaw;
+
+    // Shares outstanding (for float cross-validation and market cap computation)
+    const sharesRaw = extractStat('Shares outstanding') || extractStat('Shares out');
+    if (sharesRaw) result.shares_outstanding = sharesRaw;
+
+    // Float shares
+    const floatRaw = extractStat('Public float') || extractStat('Float');
+    if (floatRaw) result.float_shares = floatRaw;
+
+    // Short interest / short % of float
+    const shortRaw = extractStat('Short interest') || extractStat('Short % of float');
+    if (shortRaw) result.short_interest = shortRaw;
 
     // P/E ratio
     const peRaw = extractStat('P/E ratio');
@@ -172,15 +188,21 @@ export default async function handler(req, res) {
     const yrRaw = extractStat('52-wk range') || extractStat('52 week range');
     if (yrRaw) result.year_range = yrRaw;
 
+    // 52-week high/low separately
+    const w52High = extractStat('52-wk high') || extractStat('52-week high');
+    if (w52High) result.week_52_high = w52High;
+    const w52Low = extractStat('52-wk low') || extractStat('52-week low');
+    if (w52Low) result.week_52_low = w52Low;
+
     // Previous close (from stats, fallback)
     if (!result.previous_close) {
       const pcRaw = extractStat('Previous close');
       if (pcRaw) result.previous_close = parseFloat(pcRaw.replace(/[,$]/g, ''));
     }
 
-    // Volume
-    const volRaw = extractStat('Volume');
-    if (volRaw) result.volume = volRaw;
+    // Open price (for gap % computation)
+    const openRaw = extractStat('Open');
+    if (openRaw) result.open = parseFloat(String(openRaw).replace(/[,$]/g, ''));
 
     return res.status(200).json(result);
   } catch (err) {

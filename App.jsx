@@ -359,17 +359,30 @@ export default function App() {
       const chartMetrics = computeChartMetrics(monthlyPoints, price);
       if (chartMetrics && priceUpdate) {
         priceUpdate.atr_pct = chartMetrics.atr_pct;
-        priceUpdate.gap_pct = chartMetrics.gap_pct;
         // Use chart-computed avg_volume as fallback
         if (!priceUpdate.avg_volume) priceUpdate.avg_volume = chartMetrics.avg_volume;
 
-        // Relative volume: prefer Yahoo's 3-month avg if available (more accurate), else use chart-based
-        const rawAvg3m = freshQuote?._raw_avg_volume_3m;
-        const rawTodayVol = freshQuote?._raw_market_volume;
-        if (Number.isFinite(rawAvg3m) && rawAvg3m > 0 && Number.isFinite(rawTodayVol)) {
-          priceUpdate.relative_volume = +(rawTodayVol / rawAvg3m).toFixed(1);
+        // Gap %: prefer Yahoo's direct computation (open vs prev close), then chart-based
+        if (Number.isFinite(freshQuote?.gap_pct)) {
+          priceUpdate.gap_pct = freshQuote.gap_pct;
         } else {
-          priceUpdate.relative_volume = chartMetrics.relative_volume;
+          priceUpdate.gap_pct = chartMetrics.gap_pct;
+        }
+
+        // Relative volume: prefer Yahoo's pre-computed (3-month avg), then 10-day, then chart-based
+        if (Number.isFinite(freshQuote?.relative_volume) && freshQuote.relative_volume > 0) {
+          priceUpdate.relative_volume = freshQuote.relative_volume;
+        } else {
+          const rawAvg3m = freshQuote?._raw_avg_volume_3m;
+          const rawAvg10d = freshQuote?._raw_avg_volume_10d;
+          const rawTodayVol = freshQuote?._raw_market_volume;
+          if (Number.isFinite(rawAvg3m) && rawAvg3m > 0 && Number.isFinite(rawTodayVol)) {
+            priceUpdate.relative_volume = +(rawTodayVol / rawAvg3m).toFixed(1);
+          } else if (Number.isFinite(rawAvg10d) && rawAvg10d > 0 && Number.isFinite(rawTodayVol)) {
+            priceUpdate.relative_volume = +(rawTodayVol / rawAvg10d).toFixed(1);
+          } else {
+            priceUpdate.relative_volume = chartMetrics.relative_volume;
+          }
         }
       }
 
@@ -484,16 +497,38 @@ export default function App() {
     if (isValidMetricValue(gf?.avg_volume)) enriched.avg_volume = gf.avg_volume;
     else if (isValidMetricValue(q?.avg_volume)) enriched.avg_volume = q.avg_volume;
 
-    // Always update remaining fields from Yahoo (Google doesn't provide these) — with validation
+    // Float: prefer Yahoo (most reliable), cross-validate with Google Finance if available
     if (isValidMetricValue(q?.float_val)) enriched.float_val = q.float_val;
+    else if (isValidMetricValue(gf?.float_shares)) enriched.float_val = gf.float_shares;
+
+    // Short interest: Yahoo is the primary source; Google Finance may provide a fallback
     if (isValidMetricValue(q?.short_interest)) enriched.short_interest = q.short_interest;
+    else if (isValidMetricValue(gf?.short_interest)) enriched.short_interest = gf.short_interest;
+
+    // Pre-market volume: only from Yahoo
     if (isValidMetricValue(q?.premarket_vol)) enriched.premarket_vol = q.premarket_vol;
+
+    // Relative volume: use Yahoo's pre-computed value (today's volume / 3-month avg)
+    if (Number.isFinite(q?.relative_volume) && q.relative_volume > 0) {
+      enriched.relative_volume = q.relative_volume;
+    }
+
+    // Gap %: prefer Yahoo's direct computation (regularMarketOpen vs previousClose)
+    if (Number.isFinite(q?.gap_pct)) {
+      enriched.gap_pct = q.gap_pct;
+    } else if (gf?.open && gf?.previous_close && gf.previous_close > 0) {
+      enriched.gap_pct = +(((gf.open - gf.previous_close) / gf.previous_close) * 100).toFixed(1);
+    }
+
     if (q?.exchange) enriched.exchange = q.exchange;
     if (q?.company) enriched.company = q.company;
 
-    // Store Google Finance previous close for gap calculation
+    // Store raw values for chart-based cross-validation
     if (gf?.previous_close && Number.isFinite(gf.previous_close) && gf.previous_close > 0) {
       enriched._prevClose = gf.previous_close;
+    }
+    if (q?._raw_prev_close && Number.isFinite(q._raw_prev_close) && q._raw_prev_close > 0) {
+      enriched._prevClose = enriched._prevClose || q._raw_prev_close;
     }
 
     return enriched;

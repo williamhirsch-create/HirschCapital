@@ -10,7 +10,15 @@ export default async function handler(req, res) {
 
     const qs = new URLSearchParams({
       symbols: symbol,
-      fields: 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose,marketCap,sharesOutstanding,averageDailyVolume3Month,floatShares,shortPercentOfFloat,preMarketVolume,preMarketPrice,longName,shortName,exchangeName',
+      fields: [
+        'symbol','regularMarketPrice','regularMarketChangePercent','regularMarketVolume',
+        'regularMarketPreviousClose','regularMarketOpen','marketCap','sharesOutstanding',
+        'averageDailyVolume3Month','averageDailyVolume10Day','floatShares',
+        'shortPercentOfFloat','sharesShort','shortRatio',
+        'preMarketVolume','preMarketPrice','preMarketChange','preMarketChangePercent',
+        'fiftyTwoWeekHigh','fiftyTwoWeekLow',
+        'longName','shortName','exchangeName',
+      ].join(','),
     }).toString();
 
     let upstream = null;
@@ -45,6 +53,7 @@ export default async function handler(req, res) {
 
     const floatShares = q.floatShares;
     const shortPct = q.shortPercentOfFloat;
+    const sharesShort = q.sharesShort;
     const pmVol = q.preMarketVolume;
 
     // Compute market cap from shares outstanding × live price (more accurate than Yahoo's stale marketCap field)
@@ -55,13 +64,37 @@ export default async function handler(req, res) {
       : null;
     const bestCap = computedCap || q.marketCap;
 
+    // Avg volume: prefer 3-month average, expose 10-day for relative volume computation
+    const avgVol3m = q.averageDailyVolume3Month;
+    const avgVol10d = q.averageDailyVolume10Day;
+
+    // Relative volume: compute from today's volume vs 3-month average (most stable denominator)
+    // Also compute against 10-day average for a more responsive reading
+    const todayVol = q.regularMarketVolume;
+    const relVol3m = Number.isFinite(avgVol3m) && avgVol3m > 0 && Number.isFinite(todayVol)
+      ? +(todayVol / avgVol3m).toFixed(1) : null;
+    const relVol10d = Number.isFinite(avgVol10d) && avgVol10d > 0 && Number.isFinite(todayVol)
+      ? +(todayVol / avgVol10d).toFixed(1) : null;
+
+    // Gap %: compute from today's open vs previous close (direct from Yahoo, most accurate)
+    const mktOpen = q.regularMarketOpen;
+    const prevClose = q.regularMarketPreviousClose;
+    const gapPct = Number.isFinite(mktOpen) && Number.isFinite(prevClose) && prevClose > 0
+      ? +(((mktOpen - prevClose) / prevClose) * 100).toFixed(1) : null;
+
+    // Short interest: cross-validate shortPercentOfFloat with sharesShort / floatShares
+    let bestShortPct = shortPct;
+    if ((!Number.isFinite(bestShortPct) || bestShortPct <= 0) && Number.isFinite(sharesShort) && sharesShort > 0 && Number.isFinite(floatShares) && floatShares > 0) {
+      bestShortPct = sharesShort / floatShares;
+    }
+
     // Build response with validated numeric fields
     const capStr = fmtCap(bestCap);
-    const avgVolStr = q.averageDailyVolume3Month ? fmtVol(q.averageDailyVolume3Month) : null;
+    const avgVolStr = avgVol3m ? fmtVol(avgVol3m) : (avgVol10d ? fmtVol(avgVol10d) : null);
     const floatStr = Number.isFinite(floatShares) && floatShares > 0
       ? (floatShares >= 1e9 ? `${(floatShares / 1e9).toFixed(1)}B` : floatShares >= 1e6 ? `${(floatShares / 1e6).toFixed(1)}M` : `${(floatShares / 1e3).toFixed(0)}K`)
       : null;
-    const shortStr = Number.isFinite(shortPct) && shortPct > 0 ? `${(shortPct * 100).toFixed(1)}%` : null;
+    const shortStr = Number.isFinite(bestShortPct) && bestShortPct > 0 ? `${(bestShortPct * 100).toFixed(1)}%` : null;
     const pmVolStr = Number.isFinite(pmVol) && pmVol > 0 ? fmtVol(pmVol) : null;
 
     // Double-check: only include formatted values that look like valid short numeric strings
@@ -77,12 +110,25 @@ export default async function handler(req, res) {
       short_interest: validMetric(shortStr) ? shortStr : null,
       premarket_vol: validMetric(pmVolStr) ? pmVolStr : null,
       premarket_price: q.preMarketPrice || null,
+      // Computed metrics from Yahoo's raw fields (more accurate than relying on pre-computed values)
+      relative_volume: relVol3m,
+      relative_volume_10d: relVol10d,
+      gap_pct: gapPct,
       exchange: q.exchangeName || q.exchange,
       company: q.longName || q.shortName,
-      // Raw numeric values for frontend metric computation
-      _raw_market_volume: q.regularMarketVolume || null,
-      _raw_avg_volume_3m: q.averageDailyVolume3Month || null,
+      // Raw numeric values for frontend metric computation and cross-validation
+      _raw_market_volume: todayVol || null,
+      _raw_avg_volume_3m: avgVol3m || null,
+      _raw_avg_volume_10d: avgVol10d || null,
       _raw_market_cap: bestCap || null,
+      _raw_market_open: mktOpen || null,
+      _raw_prev_close: prevClose || null,
+      _raw_float_shares: floatShares || null,
+      _raw_shares_short: sharesShort || null,
+      _raw_short_ratio: q.shortRatio || null,
+      _raw_premarket_change_pct: q.preMarketChangePercent || null,
+      _raw_52w_high: q.fiftyTwoWeekHigh || null,
+      _raw_52w_low: q.fiftyTwoWeekLow || null,
     });
   } catch (err) {
     return res.status(500).json({ error: 'Unexpected quote proxy error.', detail: String(err?.message || err) });
