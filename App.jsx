@@ -234,6 +234,7 @@ export default function App() {
   const [mm, setMm] = useState(false);
   const [preloadReady, setPreloadReady] = useState(false);
   const [preloadProgress, setPreloadProgress] = useState({ step: "", done: 0, total: 10 });
+  const [metricReady, setMetricReady] = useState({});
 
   useEffect(() => { const h = () => setSc(window.scrollY > 20); window.addEventListener("scroll", h); return () => window.removeEventListener("scroll", h); }, []);
   useEffect(() => { const path = pg === "home" ? "/" : `/${pg}`; if (window.location.pathname !== path) window.history.pushState(null, "", path); }, [pg]);
@@ -535,6 +536,16 @@ export default function App() {
         if (!Number.isFinite(pick[field])) pick[field] = 0;
       }
       enrichedPicks[id] = pick;
+
+      // Wave 1: Mark quote-sourced metrics as ready and update UI immediately
+      const ready = new Set();
+      if (isValidMetricValue(pick.market_cap) && pick.market_cap !== 'N/A') ready.add('market_cap');
+      if (isValidMetricValue(pick.avg_volume) && pick.avg_volume !== 'N/A') ready.add('avg_volume');
+      if (isValidMetricValue(pick.float_val) && pick.float_val !== 'N/A') ready.add('float_val');
+      if (isValidMetricValue(pick.short_interest) && pick.short_interest !== 'N/A') ready.add('short_interest');
+      if (isValidMetricValue(pick.premarket_vol) && pick.premarket_vol !== 'N/A') ready.add('premarket_vol');
+      setMetricReady(prev => ({ ...prev, [id]: new Set(ready) }));
+      setP(prev => ({ ...prev, [id]: enrichedPicks[id] }));
       progress(`${pick.ticker} quote loaded`);
 
       // Load charts (quote is already cached from enrichment, so no redundant fetch)
@@ -547,6 +558,18 @@ export default function App() {
       if (result.priceUpdate && Number.isFinite(result.priceUpdate.price) && result.priceUpdate.price > 0) {
         enrichedPicks[id] = { ...enrichedPicks[id], ...result.priceUpdate };
       }
+
+      // Wave 2: Mark chart-computed metrics as ready
+      if (Number.isFinite(enrichedPicks[id].atr_pct)) ready.add('atr_pct');
+      if (Number.isFinite(enrichedPicks[id].relative_volume)) ready.add('relative_volume');
+      if (Number.isFinite(enrichedPicks[id].gap_pct)) ready.add('gap_pct');
+      // Re-check quote fields that may have been updated by chart data
+      if (isValidMetricValue(enrichedPicks[id].market_cap) && enrichedPicks[id].market_cap !== 'N/A') ready.add('market_cap');
+      if (isValidMetricValue(enrichedPicks[id].avg_volume) && enrichedPicks[id].avg_volume !== 'N/A') ready.add('avg_volume');
+      if (isValidMetricValue(enrichedPicks[id].float_val) && enrichedPicks[id].float_val !== 'N/A') ready.add('float_val');
+      if (isValidMetricValue(enrichedPicks[id].short_interest) && enrichedPicks[id].short_interest !== 'N/A') ready.add('short_interest');
+      if (isValidMetricValue(enrichedPicks[id].premarket_vol) && enrichedPicks[id].premarket_vol !== 'N/A') ready.add('premarket_vol');
+      setMetricReady(prev => ({ ...prev, [id]: new Set(ready) }));
 
       // Update this category's UI immediately — don't wait for other categories
       setCh(prev => ({ ...prev, [id]: result.charts }));
@@ -729,23 +752,59 @@ export default function App() {
         </div>
       </div>
 
-      {/* METRICS — progress bar while live data loads; values shown once live/delayed/offline */}
+      {/* METRICS — individual progress bars per metric until live data arrives */}
       <div style={{marginTop:18}}>
-        {(ds==="static"||ds==="loading") && (
-          <div className="afu d2" style={{background:"var(--cd)",borderRadius:14,padding:"16px 20px",border:"1px solid var(--bd)",marginBottom:10}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-              <div className="fs" style={{fontSize:12,fontWeight:600,color:"var(--tx)",letterSpacing:".02em"}}>Loading live market data</div>
-              <div className="fs" style={{fontSize:12,fontWeight:700,color:"var(--ac)"}}>{Math.round((preloadProgress.done/Math.max(1,preloadProgress.total))*100)}%</div>
+        {(()=>{
+          const readySet = metricReady[ac] || new Set();
+          const totalMetrics = 8;
+          const doneCount = readySet.size;
+          const allDone = doneCount >= totalMetrics;
+          const metrics = [
+            {l:"Market Cap",k:"market_cap",v:pk.market_cap,src:"Quote"},
+            {l:"Avg Volume",k:"avg_volume",v:pk.avg_volume,src:"Quote"},
+            {l:"Rel. Volume",k:"relative_volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null,src:"Chart"},
+            {l:"14D ATR%",k:"atr_pct",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null,src:"Chart"},
+            {l:"Float",k:"float_val",v:pk.float_val||pk.float,src:"Quote"},
+            {l:"Short Interest",k:"short_interest",v:pk.short_interest,src:"Quote"},
+            {l:"Gap %",k:"gap_pct",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null,src:"Chart"},
+            {l:"Pre-Mkt Vol",k:"premarket_vol",v:pk.premarket_vol,src:"Quote"},
+          ];
+          return (<>
+            {!allDone && (
+              <div className="afu d2" style={{background:"var(--cd)",borderRadius:14,padding:"14px 20px",border:"1px solid var(--bd)",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                  <div className="fs" style={{fontSize:12,fontWeight:600,color:"var(--tx)",letterSpacing:".02em"}}>Loading live metrics</div>
+                  <div className="fs" style={{fontSize:12,fontWeight:700,color:"var(--ac)"}}>{doneCount}/{totalMetrics}</div>
+                </div>
+                <div style={{height:4,background:"var(--bd)",borderRadius:2,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${Math.max(5,Math.round((doneCount/totalMetrics)*100))}%`,background:"var(--ac)",borderRadius:2,transition:"width .4s ease"}}/>
+                </div>
+              </div>
+            )}
+            <div className={"afu d2 mg"} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
+              {metrics.map((m,i)=>{
+                const isReady = readySet.has(m.k);
+                const safe = isReady && isValidMetricValue(m.v) ? m.v : null;
+                return (<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:`1px solid ${isReady?"var(--bd)":"var(--bd)"}`,transition:"all .3s ease"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
+                    <div className="fs" style={{fontSize:10,color:"var(--mu)",fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div>
+                    {isReady && <div style={{width:6,height:6,borderRadius:"50%",background:"var(--gn)"}}/>}
+                  </div>
+                  {isReady ? (
+                    <div className="fs" style={{fontSize:17,fontWeight:700,animation:"fu .3s ease forwards"}}>{safe || "N/A"}</div>
+                  ) : (
+                    <div style={{marginTop:4}}>
+                      <div style={{height:4,background:"var(--bd)",borderRadius:2,overflow:"hidden",marginBottom:6}}>
+                        <div className="pb" style={{height:"100%",width:"100%"}}/>
+                      </div>
+                      <div className="fs" style={{fontSize:9,color:"var(--mu)",letterSpacing:".04em"}}>Fetching {m.src.toLowerCase()} data...</div>
+                    </div>
+                  )}
+                </div>);
+              })}
             </div>
-            <div style={{height:6,background:"var(--bd)",borderRadius:3,overflow:"hidden",marginBottom:8}}>
-              <div className="pb" style={{height:"100%",width:`${Math.max(5,Math.round((preloadProgress.done/Math.max(1,preloadProgress.total))*100))}%`,transition:"width .4s ease"}}/>
-            </div>
-            <div className="fs" style={{fontSize:11,color:"var(--mu)"}}>{preloadProgress.step||"Connecting to market data..."}</div>
-          </div>
-        )}
-        <div className={"afu d2 mg"} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
-          {[{l:"Market Cap",v:pk.market_cap},{l:"Avg Volume",v:pk.avg_volume},{l:"Rel. Volume",v:Number.isFinite(pk.relative_volume)?`${pk.relative_volume}x`:null},{l:"14D ATR%",v:Number.isFinite(pk.atr_pct)?pk.atr_pct+"%":null},{l:"Float",v:pk.float_val||pk.float},{l:"Short Interest",v:pk.short_interest},{l:"Gap %",v:Number.isFinite(pk.gap_pct)?`${pk.gap_pct>=0?"+":""}${pk.gap_pct}%`:null},{l:"Pre-Mkt Vol",v:pk.premarket_vol}].map((m,i)=>{const safe=isValidMetricValue(m.v)?m.v:"N/A";const isLoading=ds==="static"||ds==="loading";return(<div key={i} style={{background:"var(--cd)",borderRadius:12,padding:"12px 14px",border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,color:"var(--mu)",marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>{m.l}</div>{isLoading?<div style={{height:18,display:"flex",alignItems:"center",marginTop:4}}><div className="pb" style={{height:3,width:"100%"}}/></div>:<div className="fs" style={{fontSize:17,fontWeight:700}}>{safe}</div>}</div>);})}
-        </div>
+          </>);
+        })()}
       </div>
 
       {/* HIRSCH SCORE */}
