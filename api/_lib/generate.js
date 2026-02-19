@@ -209,10 +209,11 @@ const fetchAndEnrichCandidates = async (categoryId) => {
 };
 
 /** Select the top pick for a category using live data */
-const selectTopPick = async (categoryId, dateKey) => {
+const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set()) => {
   const cat = CATEGORIES.find(c => c.id === categoryId);
   const catLabel = cat?.label || categoryId;
-  const enriched = await fetchAndEnrichCandidates(categoryId);
+  const enriched = (await fetchAndEnrichCandidates(categoryId))
+    .filter(s => !excludeTickers.has(s.ticker));
 
   if (!enriched.length) {
     // Fallback: return a minimal placeholder if no live data available
@@ -378,10 +379,13 @@ export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
     }
   }
 
-  // Generate fresh picks using live data for all categories
+  // Generate fresh picks using live data for all categories (no duplicates across categories)
   const picks = {};
+  const usedTickers = new Set();
   for (const c of CATEGORIES) {
-    picks[c.id] = await selectTopPick(c.id, dateKey);
+    const pick = await selectTopPick(c.id, dateKey, usedTickers);
+    picks[c.id] = pick;
+    if (pick.ticker && pick.ticker !== 'N/A') usedTickers.add(pick.ticker);
   }
 
   const payload = {
