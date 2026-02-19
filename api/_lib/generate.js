@@ -337,18 +337,32 @@ export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
   const cached = store.daily_picks[dateKey];
   const cachedHasRealData = cached && Object.values(cached.picks || {}).some(p => p.hirsch_score > 0);
 
-  // Auto-refresh stale picks: if today's picks were generated before 8:30 AM ET
-  // and it's now past 8:30 AM, regenerate with fresh pre-market data.
+  // Auto-refresh stale picks with two daily refresh gates:
+  //   1) 8:30 AM ET — pre-market refresh with overnight/pre-market data
+  //   2) 9:30 AM ET — market-open refresh with fresh opening-bell data
+  // Also regenerate if cached picks were created on a different date than today.
   // This ensures picks always update even if the scheduled cron job fails.
   let stale = false;
   if (!force && cachedHasRealData && cached?.created_at) {
     const now = getNowInTzParts();
     const nowMins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
     const todayStr = `${now.year}-${now.month}-${now.day}`;
-    if (dateKey === todayStr && nowMins >= 510) { // 510 = 8:30 AM
+
+    if (dateKey === todayStr) {
       const created = getNowInTzParts(new Date(cached.created_at));
+      const createdStr = `${created.year}-${created.month}-${created.day}`;
       const createdMins = parseInt(created.hour, 10) * 60 + parseInt(created.minute, 10);
-      if (createdMins < 510) stale = true;
+
+      if (createdStr !== todayStr) {
+        // Picks cached under today's key but created on a different date — always stale
+        stale = true;
+      } else if (nowMins >= 510 && createdMins < 510) {
+        // Pre-market gate: created before 8:30 AM, now past 8:30 AM
+        stale = true;
+      } else if (nowMins >= 570 && createdMins < 570) {
+        // Market-open gate: created before 9:30 AM, now past 9:30 AM
+        stale = true;
+      }
     }
   }
 
