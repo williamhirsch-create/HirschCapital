@@ -432,7 +432,7 @@ export default function App() {
     if (!force && apiPicksRef.current) return apiPicksRef.current;
     try {
       const url = force ? "/api/today?force=true" : "/api/today";
-      const r = await fetch(url);
+      const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) return null;
       const data = await r.json();
       // Only cache if picks have real scored data

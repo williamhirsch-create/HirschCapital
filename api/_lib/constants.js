@@ -116,4 +116,4 @@ export const SIGNAL_WEIGHTS = {
 };
 
 // Algorithm version — bump to force regeneration when algorithm changes
-export const ALGO_VERSION = 7;
+export const ALGO_VERSION = 8;

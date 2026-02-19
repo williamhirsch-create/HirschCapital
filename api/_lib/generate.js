@@ -369,8 +369,7 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
 
   // Check rotation triggers BEFORE the cache return
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
-  const oneDateOverride = dateKey === '2026-02-19' && !cached?._excluded_tickers?.length;
-  const needsRotation = rotate || versionChanged || oneDateOverride;
+  const needsRotation = rotate || versionChanged;
 
   if (!force && !needsRotation && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
