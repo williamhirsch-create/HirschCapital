@@ -46,12 +46,15 @@ export const isLocalMidnight = (date = new Date(), tz = SITE_TIMEZONE) => {
   return (h === 23 && m >= 45) || (h === 0 && m <= 15);
 };
 
-/** Check if current time is in the pre-market generation window (8:15–8:45 AM ET).
- *  This runs 45 minutes before market open (9:30 AM) so picks use fresh pre-market data. */
+/** Check if current time is in the pre-market generation window (7:00–9:15 AM ET).
+ *  Wide window ensures cron succeeds even with delays, across both EST and EDT.
+ *  The last cron run within the window overwrites earlier ones with fresher data. */
 export const isPreMarketWindow = (date = new Date(), tz = SITE_TIMEZONE) => {
   const p = getNowInTzParts(date, tz);
   const h = parseInt(p.hour, 10);
   const m = parseInt(p.minute, 10);
-  // 30-minute window: 8:15–8:45 AM to handle cron timing variance around 8:30 AM
-  return h === 8 && m >= 15 && m <= 45;
+  const totalMins = h * 60 + m;
+  // 7:00 AM – 9:15 AM ET (135-minute window)
+  // Covers both EST (UTC-5) and EDT (UTC-4) cron runs with margin for delays
+  return totalMins >= 420 && totalMins <= 555;
 };

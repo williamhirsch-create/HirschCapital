@@ -634,24 +634,51 @@ export default function App() {
     }
   }, []);
 
-  // Midnight refresh: detect ET date change and regenerate picks on new market days
+  // Periodic refresh: detect ET date change (midnight) and 8:30 AM pre-market data update
   const lastETDateRef = useRef(getETDate());
+  const morningRefreshDone = useRef(false);
   useEffect(() => {
-    const checkDateChange = () => {
+    const getETMinutes = () => {
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+        const h = parseInt(parts.find(p => p.type === 'hour').value, 10);
+        const m = parseInt(parts.find(p => p.type === 'minute').value, 10);
+        return h * 60 + m;
+      } catch { return -1; }
+    };
+    const checkRefresh = () => {
       try {
         const etDate = getETDate();
+        // Midnight: date changed — reset morning flag and reload on market days
         if (etDate !== lastETDateRef.current) {
           lastETDateRef.current = etDate;
+          morningRefreshDone.current = false;
           const d = new Date(etDate + "T12:00:00Z");
           const day = d.getUTCDay();
           if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
+            apiPicksRef.current = null;
+            preloadStarted.current = false;
+            preloadAllData();
+          }
+          return;
+        }
+        // 8:30 AM ET: refresh picks with fresh pre-market data (once per day)
+        const mins = getETMinutes();
+        if (mins >= 510 && !morningRefreshDone.current) {
+          morningRefreshDone.current = true;
+          const d = new Date(etDate + "T12:00:00Z");
+          const day = d.getUTCDay();
+          if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
+            apiPicksRef.current = null;
             preloadStarted.current = false;
             preloadAllData();
           }
         }
+        // Reset morning flag before 8:30 AM so it triggers again next morning
+        if (mins < 510) morningRefreshDone.current = false;
       } catch {}
     };
-    const interval = setInterval(checkDateChange, 60000);
+    const interval = setInterval(checkRefresh, 60000);
     return () => clearInterval(interval);
   }, []);
 
