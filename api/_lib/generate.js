@@ -382,8 +382,9 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   // Generate fresh picks using live data for all categories (no duplicates across categories)
   const picks = {};
   const usedTickers = new Set();
-  // When rotating, exclude previously cached tickers so every category gets a different stock
-  if (rotate && cached?.picks) {
+  // Exclude previously cached tickers when rotating OR when version changed (forces new stocks)
+  const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
+  if ((rotate || versionChanged) && cached?.picks) {
     for (const p of Object.values(cached.picks)) {
       if (p.ticker && p.ticker !== 'N/A') usedTickers.add(p.ticker);
     }
