@@ -387,7 +387,18 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const picks = {};
   const usedTickers = new Set();
   const excludedTickers = new Set();
-  // Exclude previously cached tickers when rotation is needed
+
+  // Auto-rotate daily: exclude previous trading day's picks so stocks change each day
+  if (prev?.picks) {
+    for (const p of Object.values(prev.picks)) {
+      if (p.ticker && p.ticker !== 'N/A') {
+        usedTickers.add(p.ticker);
+        excludedTickers.add(p.ticker);
+      }
+    }
+  }
+
+  // Exclude current day's cached tickers when explicit rotation is needed (version bump or ?rotate=true)
   if (needsRotation && cached?.picks) {
     for (const p of Object.values(cached.picks)) {
       if (p.ticker && p.ticker !== 'N/A') {
