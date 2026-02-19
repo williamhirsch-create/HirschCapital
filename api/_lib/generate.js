@@ -3,6 +3,106 @@ import { fetchChart, fetchQuotes, computeMetrics } from './market.js';
 import { getStore, setStore, upsertTrackRow } from './store.js';
 import { previousDateKey, getNowInTzParts } from './date.js';
 
+/* ══════════════════════════════════════════════════════════════════
+   Seeded randomness — deterministic within a time window but shifts
+   at each refresh gate (8:30 / 9:30 AM) so exploration changes.
+   ══════════════════════════════════════════════════════════════════ */
+const simpleHash = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+};
+
+const seededRandom = (seed) => ((simpleHash(seed) & 0x7fffffff) % 10000) / 10000;
+
+/** Returns which time window we're in — changes at each refresh gate */
+const getTimeWindow = () => {
+  const now = getNowInTzParts();
+  const mins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
+  if (mins < 510) return 'early';    // before 8:30 AM ET
+  if (mins < 570) return 'preopen';  // 8:30–9:30 AM ET
+  return 'open';                      // after 9:30 AM ET
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   Exploration bonus — stochastic component per ticker.
+   Stocks we haven't picked or that have strong track records get
+   higher bonuses, injecting non-determinism into the ranking.
+   ══════════════════════════════════════════════════════════════════ */
+const computeExplorationBonus = (ticker, dateKey, timeWindow, tickerHistory) => {
+  const seed = `${ticker}-${dateKey}-${timeWindow}-explore`;
+  const rand = seededRandom(seed);
+
+  const history = tickerHistory?.[ticker];
+  let explorationWeight = 0.6;
+  if (history && history.picks > 0) {
+    const winRate = (history.wins || 0) / history.picks;
+    // Proven winners: moderate boost. Many losses: lower. Few picks: explore more.
+    explorationWeight = history.picks < 3 ? 0.7 : 0.25 + winRate * 0.5;
+  } else {
+    explorationWeight = 0.85; // Never picked → high exploration incentive
+  }
+
+  // 0–10 Hirsch-score points, scaled by exploration weight
+  return Math.round(rand * explorationWeight * 10);
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   Learning system — analyzes the track record to discover which
+   signals predicted winners vs losers, then adjusts weights.
+   ══════════════════════════════════════════════════════════════════ */
+
+/** Analyze recent track record for one category and return per-signal
+ *  weight adjustments (positive = boost, negative = reduce).
+ *  Returns null if insufficient data. */
+const runLearningCycle = (trackRecord, categoryId) => {
+  const catRecords = trackRecord
+    .filter(r => r.category === categoryId && Array.isArray(r.signal_scores) && r.signal_scores.length === 7);
+
+  if (catRecords.length < 5) return null;
+
+  const recent = catRecords.slice(-60);
+  const winners = recent.filter(r => r.return_pct > 0);
+  const losers = recent.filter(r => r.return_pct <= 0);
+
+  if (winners.length < 2 || losers.length < 2) return null;
+
+  const adjustments = [];
+  for (let i = 0; i < 7; i++) {
+    const winAvg = winners.reduce((s, r) => s + (r.signal_scores[i] || 0), 0) / winners.length;
+    const loseAvg = losers.reduce((s, r) => s + (r.signal_scores[i] || 0), 0) / losers.length;
+
+    // Positive diff → signal was higher in winners → boost its weight
+    // Scale: 1.0 normalized-score gap ≈ ±6 weight points
+    const diff = winAvg - loseAvg;
+    adjustments.push(Math.max(-8, Math.min(8, Math.round(diff * 6))));
+  }
+
+  return adjustments;
+};
+
+/** Rebuild per-ticker statistics from the full track record */
+const rebuildTickerHistory = (trackRecord) => {
+  const history = {};
+  for (const row of trackRecord) {
+    const h = history[row.ticker] ||= { picks: 0, wins: 0, total_return: 0, last_date: null };
+    if (h.last_date === row.date) continue; // dedup same date
+    h.picks++;
+    if (row.return_pct > 0) h.wins++;
+    h.total_return = +(h.total_return + row.return_pct).toFixed(2);
+    h.avg_return = +(h.total_return / h.picks).toFixed(2);
+    h.last_date = row.date;
+  }
+  return history;
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   Original helpers (unchanged)
+   ══════════════════════════════════════════════════════════════════ */
+
 const toDate = (ts, tz = SITE_TIMEZONE) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts * 1000));
 
 const fmtCap = (cap) => {
@@ -35,9 +135,19 @@ const fitsCategory = (metrics, cat) => {
   return true;
 };
 
-/** Compute 7 raw signal scores from live metrics, using category-specific weights */
-const computeSignalScores = (m, categoryId) => {
-  const weights = SIGNAL_WEIGHTS[categoryId] || [14, 14, 14, 14, 14, 15, 15];
+/* ══════════════════════════════════════════════════════════════════
+   Signal scoring — now accepts optional learned weight adjustments
+   ══════════════════════════════════════════════════════════════════ */
+
+/** Compute 7 raw signal scores from live metrics.
+ *  @param learnedAdj - optional array of 7 weight adjustments from the learning system */
+const computeSignalScores = (m, categoryId, learnedAdj = null) => {
+  const baseWeights = SIGNAL_WEIGHTS[categoryId] || [14, 14, 14, 14, 14, 15, 15];
+  // Apply learned adjustments if available (clamp so no weight drops below 2)
+  const weights = learnedAdj
+    ? baseWeights.map((w, i) => Math.max(2, w + (learnedAdj[i] || 0)))
+    : [...baseWeights];
+
   // Each signal produces a 0-1 normalized score, then scaled by weight
   const raw = [
     // Signal 1: ATR% (volatility) — higher = more volatile = higher score for penny, lower importance for hyper
@@ -161,8 +271,17 @@ const generateThesis = (ticker, company, m, categoryId, catLabel) => {
   return { thesis_summary, catalysts, upside_drivers, key_levels, risks, invalidation };
 };
 
-/** Fetch live data and enrich candidates for a category */
-const fetchAndEnrichCandidates = async (categoryId) => {
+/* ══════════════════════════════════════════════════════════════════
+   Candidate enrichment — now accepts learning state + exploration
+   ══════════════════════════════════════════════════════════════════ */
+
+/** Fetch live data and enrich candidates for a category.
+ *  @param opts.learnedAdj   - learned weight adjustments for this category
+ *  @param opts.dateKey      - current date key (for exploration seed)
+ *  @param opts.timeWindow   - current time window (for exploration seed)
+ *  @param opts.tickerHistory - per-ticker performance history */
+const fetchAndEnrichCandidates = async (categoryId, opts = {}) => {
+  const { learnedAdj, dateKey, timeWindow, tickerHistory } = opts;
   const cat = CATEGORIES.find(c => c.id === categoryId);
   const tickers = (CANDIDATES[categoryId] || []).map(c => c.ticker);
   if (!tickers.length || !cat) return [];
@@ -193,14 +312,22 @@ const fetchAndEnrichCandidates = async (categoryId) => {
     // Validate the ticker still fits this category
     if (!fitsCategory(metrics, cat)) continue;
 
-    const { raw, weighted, hirsch_score } = computeSignalScores(metrics, categoryId);
+    const { raw, weighted, hirsch_score } = computeSignalScores(metrics, categoryId, learnedAdj);
+
+    // Exploration bonus: stochastic component that changes at each refresh gate
+    const bonus = dateKey
+      ? computeExplorationBonus(ticker, dateKey, timeWindow || 'early', tickerHistory)
+      : 0;
+    const adjusted_score = Math.min(99, hirsch_score + bonus);
 
     enriched.push({
       ticker,
       company: quote?.longName || quote?.shortName || info.company,
       exchange: quote?.exchangeName || info.exchange,
       metrics,
-      hirsch_score,
+      hirsch_score: adjusted_score,
+      base_score: hirsch_score,
+      exploration_bonus: bonus,
       signalScores: { raw, weighted },
     });
   }
@@ -208,11 +335,16 @@ const fetchAndEnrichCandidates = async (categoryId) => {
   return enriched.sort((a, b) => b.hirsch_score - a.hirsch_score);
 };
 
-/** Select the top pick for a category using live data */
-const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set()) => {
+/* ══════════════════════════════════════════════════════════════════
+   Pick selection — passes learning opts through and stores signal
+   scores for future learning cycles.
+   ══════════════════════════════════════════════════════════════════ */
+
+/** Select the top pick for a category using live data + learning state */
+const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set(), opts = {}) => {
   const cat = CATEGORIES.find(c => c.id === categoryId);
   const catLabel = cat?.label || categoryId;
-  const enriched = (await fetchAndEnrichCandidates(categoryId))
+  const enriched = (await fetchAndEnrichCandidates(categoryId, { ...opts, dateKey }))
     .filter(s => !excludeTickers.has(s.ticker));
 
   if (!enriched.length) {
@@ -238,6 +370,7 @@ const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set()) =>
       created_at: new Date().toISOString(),
       chosen_timestamp: new Date().toISOString(),
       reference_price: 0,
+      _signal_scores: null,
       data_source: 'none',
     };
   }
@@ -299,6 +432,13 @@ const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set()) =>
     created_at: new Date().toISOString(),
     chosen_timestamp: new Date().toISOString(),
     reference_price: m.price,
+
+    // Normalized 0-1 signal scores — stored for the learning system
+    _signal_scores: winner.signalScores.raw,
+    // Exploration metadata
+    _base_score: winner.base_score,
+    _exploration_bonus: winner.exploration_bonus,
+
     data_source: 'live',
   };
 };
@@ -326,8 +466,22 @@ const buildTrackRow = async (pick, dateKey) => {
     max_run_up_pct: +run.toFixed(2),
     max_drawdown_pct: +dd.toFixed(2),
     score: pick.hirsch_score,
+    // Normalized signal scores — used by the learning system to correlate signals with returns
+    signal_scores: pick._signal_scores || null,
   };
 };
+
+/* ══════════════════════════════════════════════════════════════════
+   Main entry point — generates daily picks with learning + exploration.
+
+   Key changes from the deterministic version:
+   1. Learning cycle: analyzes track record to adjust signal weights
+      (signals correlated with winners get boosted, losers get reduced)
+   2. Exploration bonus: stochastic component seeded by ticker + date +
+      time window, so picks can change at each refresh gate (8:30/9:30)
+   3. Stale = rotation: when staleness triggers, picks are genuinely
+      re-evaluated because the time window has changed
+   ══════════════════════════════════════════════════════════════════ */
 
 export const generateDailyPicks = async (dateKey, { force = false, rotate = false } = {}) => {
   const store = await getStore();
@@ -373,7 +527,7 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
 
   if (!force && !needsRotation && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
-  // Build track record from previous day's picks
+  // ── Build track record from previous day's picks ──
   const prevKey = previousDateKey(dateKey);
   const prev = store.daily_picks[prevKey];
   if (prev?.picks) {
@@ -383,7 +537,25 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     }
   }
 
-  // Generate fresh picks using live data for all categories (no duplicates across categories)
+  // ── Learning cycle: analyze track record and compute weight adjustments ──
+  const tickerHistory = rebuildTickerHistory(store.track_record);
+  const learnedWeights = {};
+  for (const cat of CATEGORIES) {
+    const adj = runLearningCycle(store.track_record, cat.id);
+    if (adj) learnedWeights[cat.id] = adj;
+  }
+
+  // Persist learning state for transparency / debugging
+  store.learning = {
+    weight_adjustments: learnedWeights,
+    ticker_history: tickerHistory,
+    last_learned: dateKey,
+  };
+
+  // Current time window — determines exploration bonus seed
+  const timeWindow = getTimeWindow();
+
+  // ── Generate fresh picks using live data + learning for all categories ──
   const picks = {};
   const usedTickers = new Set();
   const excludedTickers = new Set();
@@ -413,8 +585,13 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
       excludedTickers.add(t);
     }
   }
+
   for (const c of CATEGORIES) {
-    const pick = await selectTopPick(c.id, dateKey, usedTickers);
+    const pick = await selectTopPick(c.id, dateKey, usedTickers, {
+      learnedAdj: learnedWeights[c.id] || null,
+      timeWindow,
+      tickerHistory,
+    });
     picks[c.id] = pick;
     if (pick.ticker && pick.ticker !== 'N/A') usedTickers.add(pick.ticker);
   }
@@ -427,6 +604,11 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     version: ALGO_VERSION,
     // Persist excluded tickers so force regenerations don't undo rotation
     ...(excludedTickers.size > 0 ? { _excluded_tickers: [...excludedTickers] } : {}),
+    // Persist learning metadata for debugging / transparency
+    _learning: {
+      weight_adjustments: learnedWeights,
+      time_window: timeWindow,
+    },
   };
   // Only persist if at least one category has real scored data
   const hasRealData = Object.values(picks).some(p => p.hirsch_score > 0);
