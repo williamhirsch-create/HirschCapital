@@ -382,11 +382,21 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   // Generate fresh picks using live data for all categories (no duplicates across categories)
   const picks = {};
   const usedTickers = new Set();
+  const excludedTickers = new Set();
   // Exclude previously cached tickers when rotating OR when version changed (forces new stocks)
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
   if ((rotate || versionChanged) && cached?.picks) {
     for (const p of Object.values(cached.picks)) {
-      if (p.ticker && p.ticker !== 'N/A') usedTickers.add(p.ticker);
+      if (p.ticker && p.ticker !== 'N/A') {
+        usedTickers.add(p.ticker);
+        excludedTickers.add(p.ticker);
+      }
+    }
+  } else if (cached?._excluded_tickers?.length) {
+    // Sticky rotation: preserve exclusions across force regenerations for the rest of the day
+    for (const t of cached._excluded_tickers) {
+      usedTickers.add(t);
+      excludedTickers.add(t);
     }
   }
   for (const c of CATEGORIES) {
@@ -401,6 +411,8 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     picks,
     created_at: new Date().toISOString(),
     version: ALGO_VERSION,
+    // Persist excluded tickers so force regenerations don't undo rotation
+    ...(excludedTickers.size > 0 ? { _excluded_tickers: [...excludedTickers] } : {}),
   };
   // Only persist if at least one category has real scored data
   const hasRealData = Object.values(picks).some(p => p.hirsch_score > 0);
