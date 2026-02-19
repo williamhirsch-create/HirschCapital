@@ -383,9 +383,10 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const picks = {};
   const usedTickers = new Set();
   const excludedTickers = new Set();
-  // Exclude previously cached tickers when rotating OR when version changed (forces new stocks)
+  // Exclude previously cached tickers when rotating, version changed, or one-time date override
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
-  if ((rotate || versionChanged) && cached?.picks) {
+  const oneDateOverride = dateKey === '2026-02-19' && !cached?._excluded_tickers?.length;
+  if ((rotate || versionChanged || oneDateOverride) && cached?.picks) {
     for (const p of Object.values(cached.picks)) {
       if (p.ticker && p.ticker !== 'N/A') {
         usedTickers.add(p.ticker);
