@@ -367,7 +367,12 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     }
   }
 
-  if (!force && !rotate && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
+  // Check rotation triggers BEFORE the cache return
+  const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
+  const oneDateOverride = dateKey === '2026-02-19' && !cached?._excluded_tickers?.length;
+  const needsRotation = rotate || versionChanged || oneDateOverride;
+
+  if (!force && !needsRotation && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
   // Build track record from previous day's picks
   const prevKey = previousDateKey(dateKey);
@@ -383,10 +388,8 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const picks = {};
   const usedTickers = new Set();
   const excludedTickers = new Set();
-  // Exclude previously cached tickers when rotating, version changed, or one-time date override
-  const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
-  const oneDateOverride = dateKey === '2026-02-19' && !cached?._excluded_tickers?.length;
-  if ((rotate || versionChanged || oneDateOverride) && cached?.picks) {
+  // Exclude previously cached tickers when rotation is needed
+  if (needsRotation && cached?.picks) {
     for (const p of Object.values(cached.picks)) {
       if (p.ticker && p.ticker !== 'N/A') {
         usedTickers.add(p.ticker);
