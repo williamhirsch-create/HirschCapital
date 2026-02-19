@@ -7,7 +7,8 @@ export default async function handler(req, res) {
     const marketOpen = isMarketDay(key);
     if (!marketOpen) key = previousTradingDay(key);
     const force = req.query.force === 'true';
-    const data = await generateDailyPicks(key, { force });
+    const rotate = req.query.rotate === 'true';
+    const data = await generateDailyPicks(key, { force, rotate });
     res.status(200).json({ ...data, marketOpen });
   } catch (e) {
     res.status(500).json({ error: 'Failed to load daily picks', detail: String(e?.message || e) });

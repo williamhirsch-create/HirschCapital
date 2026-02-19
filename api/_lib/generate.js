@@ -329,7 +329,7 @@ const buildTrackRow = async (pick, dateKey) => {
   };
 };
 
-export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
+export const generateDailyPicks = async (dateKey, { force = false, rotate = false } = {}) => {
   const store = await getStore();
   store.daily_picks ||= {};
   store.track_record ||= [];
@@ -367,7 +367,7 @@ export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
     }
   }
 
-  if (!force && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
+  if (!force && !rotate && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
 
   // Build track record from previous day's picks
   const prevKey = previousDateKey(dateKey);
@@ -382,6 +382,12 @@ export const generateDailyPicks = async (dateKey, { force = false } = {}) => {
   // Generate fresh picks using live data for all categories (no duplicates across categories)
   const picks = {};
   const usedTickers = new Set();
+  // When rotating, exclude previously cached tickers so every category gets a different stock
+  if (rotate && cached?.picks) {
+    for (const p of Object.values(cached.picks)) {
+      if (p.ticker && p.ticker !== 'N/A') usedTickers.add(p.ticker);
+    }
+  }
   for (const c of CATEGORIES) {
     const pick = await selectTopPick(c.id, dateKey, usedTickers);
     picks[c.id] = pick;
