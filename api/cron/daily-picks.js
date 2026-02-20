@@ -6,8 +6,8 @@ export default async function handler(req, res) {
     const secret = process.env.CRON_SECRET;
     if (secret && req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
 
-    // Only generate during the 8:15–8:45 AM ET pre-market window
-    if (!isPreMarketWindow()) return res.status(200).json({ ok: true, skipped: true, reason: 'Not in pre-market window (8:15–8:45 AM ET)' });
+    // Only generate during the 7:00–10:45 AM ET window (covers pre-market + market open)
+    if (!isPreMarketWindow()) return res.status(200).json({ ok: true, skipped: true, reason: 'Not in pre-market/market-open window (7:00–10:45 AM ET)' });
 
     const key = todayKey();
     if (!isMarketDay(key)) return res.status(200).json({ ok: true, skipped: true, reason: `Market closed on ${key}` });

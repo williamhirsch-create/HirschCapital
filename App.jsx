@@ -439,7 +439,19 @@ export default function App() {
       const hasRealData = Object.values(data?.picks || {}).some(p => p.hirsch_score > 0);
       if (hasRealData) apiPicksRef.current = data;
       return data;
-    } catch { return null; }
+    } catch {
+      // Retry once on network failure after a brief delay
+      try {
+        await new Promise(r => setTimeout(r, 2000));
+        const url = force ? "/api/today?force=true" : "/api/today";
+        const r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const hasRealData = Object.values(data?.picks || {}).some(p => p.hirsch_score > 0);
+        if (hasRealData) apiPicksRef.current = data;
+        return data;
+      } catch { return null; }
+    }
   };
 
   /** Validate that a pick has all critical fields filled with real data */
@@ -534,8 +546,14 @@ export default function App() {
     return enriched;
   };
 
-  /** Master preload: fetch all picks, enrich + load charts per category, update UI as each completes */
-  const preloadAllData = async () => {
+  /** Master preload: fetch all picks, enrich + load charts per category, update UI as each completes.
+   *  @param opts.forceRefresh - if true, always force the backend to regenerate picks (used for 8:30/9:30 AM gates) */
+  const preloadingRef = useRef(false);
+  const preloadAllData = async ({ forceRefresh = false } = {}) => {
+    // Prevent concurrent preloads from racing
+    if (preloadingRef.current) return;
+    preloadingRef.current = true;
+    try {
     const catIds = CATS.map(c => c.id);
     // Prioritize the currently active category so it gets live data first
     const sortedIds = [ac, ...catIds.filter(id => id !== ac)];
@@ -545,11 +563,11 @@ export default function App() {
 
     // Step 1: Fetch all picks from the backend API
     setPreloadProgress({ step: "Fetching live picks from algorithm...", done: 0, total: totalSteps });
-    let apiData = await fetchApiPicks();
+    let apiData = await fetchApiPicks({ force: forceRefresh });
 
-    // If picks came back without real data, force a fresh regeneration
+    // If picks came back without real data (or null), force a fresh regeneration with retries
     const picksHaveRealData = Object.values(apiData?.picks || {}).some(p => p.hirsch_score > 0);
-    if (!picksHaveRealData && apiData) {
+    if (!picksHaveRealData) {
       setPreloadProgress({ step: "Regenerating picks with fresh live data...", done: 0, total: totalSteps });
       const retryData = await fetchApiPicks({ force: true });
       if (retryData) apiData = retryData;
@@ -623,6 +641,7 @@ export default function App() {
     catIds.forEach(id => loadTrackLive(id));
 
     setPreloadReady(true);
+    } finally { preloadingRef.current = false; }
   };
 
   // Start preloading all data immediately on mount
@@ -634,9 +653,10 @@ export default function App() {
     }
   }, []);
 
-  // Periodic refresh: detect ET date change (midnight) and 8:30 AM pre-market data update
+  // Periodic refresh: detect ET date change (midnight), 8:30 AM pre-market, and 9:30 AM market-open
   const lastETDateRef = useRef(getETDate());
-  const morningRefreshDone = useRef(false);
+  const preMarketRefreshDone = useRef(false);  // 8:30 AM gate
+  const marketOpenRefreshDone = useRef(false);  // 9:30 AM gate
   useEffect(() => {
     const getETMinutes = () => {
       try {
@@ -646,38 +666,56 @@ export default function App() {
         return h * 60 + m;
       } catch { return -1; }
     };
+    const triggerRefresh = (forceRefresh = false) => {
+      apiPicksRef.current = null;
+      quoteCacheRef.current = {};   // Clear stale quote cache so enrichment fetches fresh data
+      gfCacheRef.current = {};      // Clear stale Google Finance cache
+      preloadStarted.current = false;
+      preloadAllData({ forceRefresh });
+    };
     const checkRefresh = () => {
       try {
         const etDate = getETDate();
-        // Midnight: date changed — reset morning flag and reload on market days
+        const mins = getETMinutes();
+        // Midnight: date changed — reset all flags and reload on market days
         if (etDate !== lastETDateRef.current) {
           lastETDateRef.current = etDate;
-          morningRefreshDone.current = false;
+          preMarketRefreshDone.current = false;
+          marketOpenRefreshDone.current = false;
           const d = new Date(etDate + "T12:00:00Z");
           const day = d.getUTCDay();
           if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
-            apiPicksRef.current = null;
-            preloadStarted.current = false;
-            preloadAllData();
+            triggerRefresh(false);
           }
           return;
         }
-        // 8:30 AM ET: refresh picks with fresh pre-market data (once per day)
-        const mins = getETMinutes();
-        if (mins >= 510 && !morningRefreshDone.current) {
-          morningRefreshDone.current = true;
+        // Gate 1 — 8:30 AM ET: refresh with fresh pre-market data (force regeneration)
+        if (mins >= 510 && !preMarketRefreshDone.current) {
+          preMarketRefreshDone.current = true;
           const d = new Date(etDate + "T12:00:00Z");
           const day = d.getUTCDay();
           if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
-            apiPicksRef.current = null;
-            preloadStarted.current = false;
-            preloadAllData();
+            triggerRefresh(true);
           }
         }
-        // Reset morning flag before 8:30 AM so it triggers again next morning
-        if (mins < 510) morningRefreshDone.current = false;
+        // Gate 2 — 9:30 AM ET: refresh with fresh market-open data (force regeneration)
+        if (mins >= 570 && !marketOpenRefreshDone.current) {
+          marketOpenRefreshDone.current = true;
+          const d = new Date(etDate + "T12:00:00Z");
+          const day = d.getUTCDay();
+          if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
+            triggerRefresh(true);
+          }
+        }
+        // Reset flags before 8:30 AM so they trigger again next morning
+        if (mins >= 0 && mins < 510) {
+          preMarketRefreshDone.current = false;
+          marketOpenRefreshDone.current = false;
+        }
       } catch {}
     };
+    // Check immediately on mount (in case page loads at/after a gate time)
+    checkRefresh();
     const interval = setInterval(checkRefresh, 60000);
     return () => clearInterval(interval);
   }, []);

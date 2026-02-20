@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/daily-picks", "schedule": "15,30,45 12,13,14 * * 1-5" }
+    { "path": "/api/cron/daily-picks", "schedule": "0,15,30,45 12,13,14 * * 1-5" }
   ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
