@@ -407,22 +407,24 @@ export default function App() {
     }
   };
 
-  const loadTrackLive = async (id) => {
-    if (trackLive[id]) return;
-    const rows = HIST_MKT[id] || [];
+  const loadTrackLive = async (id, force = false) => {
+    if (!force && trackLive[id]) return;
     try {
-      const openDays = mktKeySet(140);
-      const updated = await Promise.all(rows.map(async (row, idx) => {
-        const mk = await fetch(`/api/market?symbol=${encodeURIComponent(row.t)}&range=6mo&interval=1d`).then(r => r.ok ? r.json() : null);
-        const daily = (mk?.points || []).filter(pt => openDays.has(ymd(new Date(pt.ts * 1000))));
-        const pick = daily[Math.max(0, daily.length - 1 - idx)] || daily[daily.length - 1];
-        if (!pick) return row;
-        const dt = new Date(pick.ts * 1000);
-        return { ...row, d: fD(dt), e: +Number(pick.open ?? pick.close).toFixed(2), c: +Number(pick.close).toFixed(2), h: +Number(pick.high ?? pick.close).toFixed(2), l: +Number(pick.low ?? pick.close).toFixed(2) };
+      const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8`);
+      if (!r.ok) throw new Error(`Track record fetch failed`);
+      const data = await r.json();
+      const rows = (data.rows || []).map(row => ({
+        d: new Date(row.date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        t: row.ticker,
+        e: row.reference_price,
+        c: row.close,
+        h: row.high,
+        l: row.low,
+        s: row.score,
       }));
-      setTrackLive(p => ({ ...p, [id]: updated }));
-    } catch {
       setTrackLive(p => ({ ...p, [id]: rows }));
+    } catch {
+      setTrackLive(p => ({ ...p, [id]: [] }));
     }
   };
 
@@ -670,6 +672,7 @@ export default function App() {
       apiPicksRef.current = null;
       quoteCacheRef.current = {};   // Clear stale quote cache so enrichment fetches fresh data
       gfCacheRef.current = {};      // Clear stale Google Finance cache
+      setTrackLive({});             // Clear track record cache so it re-fetches with new data
       preloadStarted.current = false;
       preloadAllData({ forceRefresh });
     };
@@ -724,7 +727,7 @@ export default function App() {
   useEffect(() => { loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = HIST_MKT[ac]||[];
+  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||[];
 
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
@@ -939,24 +942,40 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{marginTop:36}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 className="ff" style={{fontSize:22}}>Recent {cat.label} Picks</h3><button onClick={()=>setPg("track")} className="fs" style={{background:"none",border:"none",cursor:"pointer",color:"var(--ac)",fontSize:14,fontWeight:500}}>View all →</button></div><div style={{background:"var(--cd)",borderRadius:16,padding:20,border:"1px solid var(--bd)"}}><TT data={hist} limit={5}/></div></div>
+      <div style={{marginTop:36}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 className="ff" style={{fontSize:22}}>Recent {cat.label} Picks</h3><button onClick={()=>setPg("track")} className="fs" style={{background:"none",border:"none",cursor:"pointer",color:"var(--ac)",fontSize:14,fontWeight:500}}>View all →</button></div><div style={{background:"var(--cd)",borderRadius:16,padding:20,border:"1px solid var(--bd)"}}>{hist.length > 0 ? <TT data={hist} limit={5}/> : <div className="fs" style={{textAlign:"center",padding:"20px 0",color:"var(--mu)",fontSize:14}}>Track record data will appear here after the first day of algorithm picks.</div>}</div></div>
       <div style={{marginTop:24}}><Disc/></div>
     </div>);
   };
 
   // TRACK RECORD
   const Track = () => {
-    const h=HIST_MKT[ac]||[];const w=h.filter(p=>p.c>p.e).length;
-    const ar=h.length?(h.reduce((a,p)=>a+((p.c-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
-    const mr2=h.length?(h.reduce((a,p)=>a+((p.h-p.e)/p.e*100),0)/h.length).toFixed(1):"0";
+    const h = trackLive[ac] || [];
+    const isLoading = trackLive[ac] === undefined;
+    const w = h.filter(p => p.c > p.e).length;
+    const ar = h.length ? (h.reduce((a, p) => a + pctRet(p.e, p.c), 0) / h.length).toFixed(1) : "0";
+    const mr2 = h.length ? (h.reduce((a, p) => a + pctRet(p.e, p.h), 0) / h.length).toFixed(1) : "0";
+    const maxRet = h.length ? Math.max(...h.map(p => pctRet(p.e, p.h))).toFixed(1) : "0";
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
-      <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses.</p>
+      <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses. Last 8 trading days of algorithm picks.</p>
       <Tabs s={{marginBottom:24}}/><Disc/>
       <div className="afu d2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:14,margin:"24px 0"}}>
-        {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length}`,c:"var(--gn)"},{l:"Avg Return",v:`${ar}%`,s:"Entry to close",c:ar>=0?"var(--gn)":"var(--rd)"},{l:"Avg Max Run",v:`${Number(mr2)>=0?"+":""}${mr2}%`,s:"Entry to high",c:Number(mr2)>=0?"var(--gn)":"var(--rd)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
+        {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length} picks`,c:"var(--gn)"},{l:"Avg Return",v:`${Number(ar)>=0?"+":""}${ar}%`,s:"Entry to close",c:Number(ar)>=0?"var(--gn)":"var(--rd)"},{l:"Max Return",v:`${Number(maxRet)>=0?"+":""}${maxRet}%`,s:"Best single pick",c:Number(maxRet)>=0?"var(--gn)":"var(--rd)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
       </div>
-      <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:22,border:"1px solid var(--bd)"}}><TT data={h}/></div>
+      {isLoading ? (
+        <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:40,border:"1px solid var(--bd)",textAlign:"center"}}>
+          <div style={{width:24,height:24,border:"3px solid var(--bd)",borderTopColor:"var(--ac)",borderRadius:"50%",animation:"sp .8s linear infinite",margin:"0 auto 16px"}}/>
+          <div className="fs" style={{color:"var(--mu)",fontSize:14}}>Loading track record data...</div>
+        </div>
+      ) : h.length === 0 ? (
+        <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:40,border:"1px solid var(--bd)",textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:12}}>📊</div>
+          <div className="fs" style={{fontSize:16,fontWeight:600,marginBottom:8}}>No Track Record Yet</div>
+          <div className="fs" style={{color:"var(--mu)",fontSize:14,lineHeight:1.7,maxWidth:400,margin:"0 auto"}}>Track record data will appear here after the algorithm generates picks. Results from each day are recorded at 8:30 AM ET the following trading day.</div>
+        </div>
+      ) : (
+        <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:22,border:"1px solid var(--bd)"}}><TT data={h}/></div>
+      )}
       <div style={{background:"var(--aml)",borderRadius:12,padding:"14px 18px",marginTop:20,fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs"><strong>Honesty Mode:</strong> All picks shown — not just winners. Past performance is not predictive. Educational only.</div>
     </div>);
   };
