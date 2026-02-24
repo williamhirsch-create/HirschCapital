@@ -424,7 +424,8 @@ export default function App() {
       }));
       setTrackLive(p => ({ ...p, [id]: rows }));
     } catch {
-      setTrackLive(p => ({ ...p, [id]: [] }));
+      // Only set empty if no data existed before — preserve stale data during refresh
+      setTrackLive(p => p[id] !== undefined ? p : { ...p, [id]: [] });
     }
   };
 
@@ -635,14 +636,19 @@ export default function App() {
     };
 
     // Process active category first, then remaining in parallel
-    await processCategory(sortedIds[0]);
+    // Individual try-catch ensures one category failure doesn't block others
+    try { await processCategory(sortedIds[0]); } catch {}
     if (sortedIds.length > 1) {
-      await Promise.all(sortedIds.slice(1).map(processCategory));
+      await Promise.allSettled(sortedIds.slice(1).map(processCategory));
     }
 
-    // Load track records — await so data is ready before the page renders
-    await Promise.all(catIds.map(id => loadTrackLive(id)));
+    // Mark page as ready immediately — track records load in background
+    setPreloadReady(true);
 
+    // Load track records non-blocking so the page isn't held up
+    Promise.all(catIds.map(id => loadTrackLive(id, forceRefresh))).catch(() => {});
+    } catch {
+    // Ensure the page always becomes accessible, even if data loading fails
     setPreloadReady(true);
     } finally {
       preloadingRef.current = false;
@@ -654,7 +660,6 @@ export default function App() {
         apiPicksRef.current = null;
         quoteCacheRef.current = {};
         gfCacheRef.current = {};
-        setTrackLive({});
         preloadAllData({ forceRefresh: doForce });
       }
     }
@@ -691,7 +696,6 @@ export default function App() {
       apiPicksRef.current = null;
       quoteCacheRef.current = {};   // Clear stale quote cache so enrichment fetches fresh data
       gfCacheRef.current = {};      // Clear stale Google Finance cache
-      setTrackLive({});             // Clear track record cache so it re-fetches with new data
       preloadStarted.current = false;
       preloadAllData({ forceRefresh });
     };
@@ -961,7 +965,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{marginTop:36}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 className="ff" style={{fontSize:22}}>Recent {cat.label} Picks</h3><button onClick={()=>setPg("track")} className="fs" style={{background:"none",border:"none",cursor:"pointer",color:"var(--ac)",fontSize:14,fontWeight:500}}>View all →</button></div><div style={{background:"var(--cd)",borderRadius:16,padding:20,border:"1px solid var(--bd)"}}>{hist.length > 0 ? <TT data={hist} limit={5}/> : <div className="fs" style={{textAlign:"center",padding:"20px 0",color:"var(--mu)",fontSize:14}}>Track record data will appear here after the first day of algorithm picks.</div>}</div></div>
+      <div style={{marginTop:36}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 className="ff" style={{fontSize:22}}>Recent {cat.label} Picks</h3><button onClick={()=>setPg("track")} className="fs" style={{background:"none",border:"none",cursor:"pointer",color:"var(--ac)",fontSize:14,fontWeight:500}}>View all →</button></div><div style={{background:"var(--cd)",borderRadius:16,padding:20,border:"1px solid var(--bd)"}}>{trackLive[ac] === undefined ? <div style={{textAlign:"center",padding:"20px 0"}}><div style={{width:20,height:20,border:"3px solid var(--bd)",borderTopColor:"var(--ac)",borderRadius:"50%",animation:"sp .8s linear infinite",margin:"0 auto 10px"}}/><div className="fs" style={{color:"var(--mu)",fontSize:13}}>Loading recent picks...</div></div> : hist.length > 0 ? <TT data={hist} limit={5}/> : <div className="fs" style={{textAlign:"center",padding:"20px 0",color:"var(--mu)",fontSize:14}}>Track record data will appear here after the first day of algorithm picks.</div>}</div></div>
       <div style={{marginTop:24}}><Disc/></div>
     </div>);
   };
