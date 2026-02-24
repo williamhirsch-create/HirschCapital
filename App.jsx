@@ -551,6 +551,7 @@ export default function App() {
   /** Master preload: fetch all picks, enrich + load charts per category, update UI as each completes.
    *  @param opts.forceRefresh - if true, always force the backend to regenerate picks (used for 8:30/9:30 AM gates) */
   const preloadingRef = useRef(false);
+  const pendingRefreshRef = useRef(null);
   const preloadAllData = async ({ forceRefresh = false } = {}) => {
     // Prevent concurrent preloads from racing
     if (preloadingRef.current) return;
@@ -639,11 +640,24 @@ export default function App() {
       await Promise.all(sortedIds.slice(1).map(processCategory));
     }
 
-    // Load track records in background (not blocking page render)
-    catIds.forEach(id => loadTrackLive(id));
+    // Load track records — await so data is ready before the page renders
+    await Promise.all(catIds.map(id => loadTrackLive(id)));
 
     setPreloadReady(true);
-    } finally { preloadingRef.current = false; }
+    } finally {
+      preloadingRef.current = false;
+      // If a refresh was queued while we were loading (e.g. 8:30 AM gate fired
+      // during initial page load), run it now so the update isn't lost
+      if (pendingRefreshRef.current !== null) {
+        const doForce = pendingRefreshRef.current;
+        pendingRefreshRef.current = null;
+        apiPicksRef.current = null;
+        quoteCacheRef.current = {};
+        gfCacheRef.current = {};
+        setTrackLive({});
+        preloadAllData({ forceRefresh: doForce });
+      }
+    }
   };
 
   // Start preloading all data immediately on mount
@@ -669,6 +683,11 @@ export default function App() {
       } catch { return -1; }
     };
     const triggerRefresh = (forceRefresh = false) => {
+      if (preloadingRef.current) {
+        // Queue the refresh — it will run after the current preload finishes
+        pendingRefreshRef.current = forceRefresh;
+        return;
+      }
       apiPicksRef.current = null;
       quoteCacheRef.current = {};   // Clear stale quote cache so enrichment fetches fresh data
       gfCacheRef.current = {};      // Clear stale Google Finance cache

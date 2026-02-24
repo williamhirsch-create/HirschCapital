@@ -525,16 +525,30 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
   const needsRotation = rotate || versionChanged;
 
-  if (!force && !needsRotation && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) return cached;
-
   // ── Build track record from previous day's picks ──
+  // Always ensure track records are built, even when returning cached picks.
+  // For forced regeneration (cron), rebuild with potentially fresher closing data.
+  // For regular requests, only build if no records exist yet for that day.
   const prevKey = previousDateKey(dateKey);
   const prev = store.daily_picks[prevKey];
+  let trackRecordUpdated = false;
   if (prev?.picks) {
-    for (const pick of Object.values(prev.picks)) {
-      const row = await buildTrackRow(pick, prevKey);
-      upsertTrackRow(store.track_record, row);
+    const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
+    const shouldBuild = force || existingPrevRecords.length === 0;
+    if (shouldBuild) {
+      const rows = await Promise.all(
+        Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
+      );
+      for (const row of rows) {
+        upsertTrackRow(store.track_record, row);
+      }
+      trackRecordUpdated = true;
     }
+  }
+
+  if (!force && !needsRotation && !stale && cached?.version === ALGO_VERSION && cachedHasRealData) {
+    if (trackRecordUpdated) await setStore(store);
+    return cached;
   }
 
   // ── Learning cycle: analyze track record and compute weight adjustments ──
