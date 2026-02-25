@@ -148,7 +148,7 @@ const fitsCategory = (metrics, cat) => {
 
 /* ══════════════════════════════════════════════════════════════════
    Signal scoring — now accepts optional learned weight adjustments
-   ══════════════════════════════════════════════════════════════════ */
+   ═════════════════════════════════════���════════════════════════════ */
 
 /** Compute 7 raw signal scores from live metrics.
  *  @param learnedAdj - optional array of 7 weight adjustments from the learning system */
@@ -546,8 +546,9 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   let trackRecordUpdated = false;
   if (prev?.picks) {
     const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
-    const hasValidRecords = existingPrevRecords.length > 0 &&
-      existingPrevRecords.some(r => r.reference_price > 0 && r.close > 0);
+    const expectedCount = Object.keys(prev.picks).length;
+    const hasValidRecords = existingPrevRecords.length >= expectedCount &&
+      existingPrevRecords.every(r => r.reference_price > 0 && r.close > 0);
     const shouldBuild = force || !hasValidRecords;
     if (shouldBuild) {
       // Build rows individually — one failure shouldn't prevent other categories
