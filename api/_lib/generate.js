@@ -27,6 +27,17 @@ const getTimeWindow = () => {
   return 'open';                      // after 9:30 AM ET
 };
 
+/** Returns the NEXT time window (used for pre-generation before a gate) */
+const getNextTimeWindow = () => {
+  const now = getNowInTzParts();
+  const mins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
+  // Within 10 minutes before 8:30 → next window is 'preopen'
+  if (mins >= 500 && mins < 510) return 'preopen';
+  // Within 10 minutes before 9:30 → next window is 'open'
+  if (mins >= 560 && mins < 570) return 'open';
+  return null; // Not near a gate
+};
+
 /* ══════════════════════════════════════════════════════════════════
    Exploration bonus — stochastic component per ticker.
    Stocks we haven't picked or that have strong track records get
@@ -483,7 +494,7 @@ const buildTrackRow = async (pick, dateKey) => {
       re-evaluated because the time window has changed
    ══════════════════════════════════════════════════════════════════ */
 
-export const generateDailyPicks = async (dateKey, { force = false, rotate = false } = {}) => {
+export const generateDailyPicks = async (dateKey, { force = false, rotate = false, timeWindowOverride = null } = {}) => {
   const store = await getStore();
   store.daily_picks ||= {};
   store.track_record ||= [];
@@ -492,30 +503,32 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const cached = store.daily_picks[dateKey];
   const cachedHasRealData = cached && Object.values(cached.picks || {}).some(p => p.hirsch_score > 0);
 
-  // Auto-refresh stale picks with two daily refresh gates:
-  //   1) 8:30 AM ET — pre-market refresh with overnight/pre-market data
-  //   2) 9:30 AM ET — market-open refresh with fresh opening-bell data
-  // Also regenerate if cached picks were created on a different date than today.
-  // This ensures picks always update even if the scheduled cron job fails.
+  // Auto-refresh stale picks using time-window comparison.
+  // If cached picks were already generated for the CURRENT time window, they're fresh.
+  // This prevents double regeneration when cron pre-generates before a gate.
   let stale = false;
   if (!force && cachedHasRealData && cached?.created_at) {
     const now = getNowInTzParts();
     const nowMins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
     const todayStr = `${now.year}-${now.month}-${now.day}`;
+    const currentWindow = getTimeWindow();
+    const cachedWindow = cached?._learning?.time_window;
 
     if (dateKey === todayStr) {
       const created = getNowInTzParts(new Date(cached.created_at));
       const createdStr = `${created.year}-${created.month}-${created.day}`;
-      const createdMins = parseInt(created.hour, 10) * 60 + parseInt(created.minute, 10);
 
       if (createdStr !== todayStr) {
         // Picks cached under today's key but created on a different date — always stale
         stale = true;
-      } else if (nowMins >= 510 && createdMins < 510) {
-        // Pre-market gate: created before 8:30 AM, now past 8:30 AM
+      } else if (cachedWindow === currentWindow) {
+        // Picks already generated for the current time window — fresh, no regeneration needed
+        stale = false;
+      } else if (nowMins >= 510 && cachedWindow === 'early') {
+        // Pre-market gate: picks still from early window, now past 8:30 AM
         stale = true;
-      } else if (nowMins >= 570 && createdMins < 570) {
-        // Market-open gate: created before 9:30 AM, now past 9:30 AM
+      } else if (nowMins >= 570 && cachedWindow !== 'open') {
+        // Market-open gate: picks not from open window, now past 9:30 AM
         stale = true;
       }
     }
@@ -527,22 +540,26 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
 
   // ── Build track record from previous day's picks ──
   // Always ensure track records are built, even when returning cached picks.
-  // For forced regeneration (cron), rebuild with potentially fresher closing data.
-  // For regular requests, only build if no records exist yet for that day.
+  // Build if: forced, OR no records exist yet, OR existing records have zero entry prices.
   const prevKey = previousDateKey(dateKey);
   const prev = store.daily_picks[prevKey];
   let trackRecordUpdated = false;
   if (prev?.picks) {
     const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
-    const shouldBuild = force || existingPrevRecords.length === 0;
+    const hasValidRecords = existingPrevRecords.length > 0 &&
+      existingPrevRecords.some(r => r.reference_price > 0 && r.close > 0);
+    const shouldBuild = force || !hasValidRecords;
     if (shouldBuild) {
-      const rows = await Promise.all(
+      // Build rows individually — one failure shouldn't prevent other categories
+      const results = await Promise.allSettled(
         Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
       );
-      for (const row of rows) {
-        upsertTrackRow(store.track_record, row);
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          upsertTrackRow(store.track_record, result.value);
+          trackRecordUpdated = true;
+        }
       }
-      trackRecordUpdated = true;
     }
   }
 
@@ -566,11 +583,10 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     last_learned: dateKey,
   };
 
-  // Current time window — determines exploration bonus seed
-  const timeWindow = getTimeWindow();
+  // Time window — use override (for pre-generation) or current
+  const timeWindow = timeWindowOverride || getTimeWindow();
 
   // ── Generate fresh picks using live data + learning for all categories ──
-  const picks = {};
   const usedTickers = new Set();
   const excludedTickers = new Set();
 
@@ -600,14 +616,31 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     }
   }
 
-  for (const c of CATEGORIES) {
-    const pick = await selectTopPick(c.id, dateKey, usedTickers, {
+  // ── Generate all categories in PARALLEL for speed ──
+  // Each category has a distinct candidate universe so no cross-category conflicts.
+  const pickResults = await Promise.allSettled(
+    CATEGORIES.map(c => selectTopPick(c.id, dateKey, usedTickers, {
       learnedAdj: learnedWeights[c.id] || null,
       timeWindow,
       tickerHistory,
-    });
-    picks[c.id] = pick;
-    if (pick.ticker && pick.ticker !== 'N/A') usedTickers.add(pick.ticker);
+    }))
+  );
+
+  const picks = {};
+  for (let i = 0; i < CATEGORIES.length; i++) {
+    const c = CATEGORIES[i];
+    if (pickResults[i].status === 'fulfilled') {
+      picks[c.id] = pickResults[i].value;
+      if (picks[c.id].ticker && picks[c.id].ticker !== 'N/A') {
+        usedTickers.add(picks[c.id].ticker);
+      }
+    } else {
+      // Fallback: use cached pick for this category if available
+      picks[c.id] = cached?.picks?.[c.id] || {
+        ticker: 'N/A', company: 'Data unavailable', hirsch_score: 0,
+        category: c.id, date: dateKey, data_source: 'none',
+      };
+    }
   }
 
   const payload = {
@@ -640,3 +673,6 @@ export const getTrackRecord = async (category, limit = 100) => {
     .sort((a, b) => (a.date < b.date ? 1 : -1));
   return rows.slice(0, limit);
 };
+
+/** Exported for cron pre-generation — returns the next time window if near a gate, else null */
+export { getNextTimeWindow };
