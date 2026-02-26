@@ -33,8 +33,11 @@ const getTimeWindow = () => {
    higher bonuses, injecting non-determinism into the ranking.
    ══════════════════════════════════════════════════════════════════ */
 const computeExplorationBonus = (ticker, dateKey, timeWindow, tickerHistory) => {
-  const seed = `${ticker}-${dateKey}-${timeWindow}-explore`;
+  // Use a stronger date+ticker seed so each day produces meaningfully different rankings
+  const seed = `${ticker}-${dateKey}-${timeWindow}-explore-v2`;
   const rand = seededRandom(seed);
+  // Secondary seed based purely on date to add per-day variance
+  const daySeed = seededRandom(`${dateKey}-daily-shuffle-${ticker}`);
 
   const history = tickerHistory?.[ticker];
   let explorationWeight = 0.6;
@@ -46,8 +49,11 @@ const computeExplorationBonus = (ticker, dateKey, timeWindow, tickerHistory) => 
     explorationWeight = 0.85; // Never picked → high exploration incentive
   }
 
-  // 0–10 Hirsch-score points, scaled by exploration weight
-  return Math.round(rand * explorationWeight * 10);
+  // 0–15 Hirsch-score points, combining exploration weight with daily randomness
+  // The wider range (was 0-10, now 0-15) ensures more variety across days
+  const baseBonus = Math.round(rand * explorationWeight * 10);
+  const dailyBonus = Math.round(daySeed * 5); // 0-5 additional daily variance
+  return Math.min(15, baseBonus + dailyBonus);
 };
 
 /* ══════════════════════════════════════════════════════════════════
@@ -444,9 +450,11 @@ const selectTopPick = async (categoryId, dateKey, excludeTickers = new Set(), op
 };
 
 const buildTrackRow = async (pick, dateKey) => {
-  const chart = await fetchChart(pick.ticker, '5d', '1d');
-  const bar = chart?.points?.find((p) => toDate(p.ts) === dateKey) || chart?.points?.[chart.points.length - 1];
-  const e = Number(bar?.open ?? chart?.meta?.chartPreviousClose ?? pick.reference_price ?? pick.price ?? 0);
+  const chart = await fetchChart(pick.ticker, '1mo', '1d');
+  const bar = chart?.points?.find((p) => toDate(p.ts) === dateKey);
+  // Prefer exact date bar's open price; fall back to pick's reference_price (price at selection time)
+  // Do NOT use chartPreviousClose as it's the prior day's close, not the entry price
+  const e = Number(bar?.open ?? pick.reference_price ?? pick.price ?? 0);
   const c = Number(bar?.close ?? pick.price ?? 0);
   const h = Number(bar?.high ?? c);
   const l = Number(bar?.low ?? c);
@@ -503,7 +511,10 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
     const nowMins = parseInt(now.hour, 10) * 60 + parseInt(now.minute, 10);
     const todayStr = `${now.year}-${now.month}-${now.day}`;
 
-    if (dateKey === todayStr) {
+    // Cached picks are for a different date than today — always stale
+    if (cached.date && cached.date !== todayStr && dateKey === todayStr) {
+      stale = true;
+    } else if (dateKey === todayStr) {
       const created = getNowInTzParts(new Date(cached.created_at));
       const createdStr = `${created.year}-${created.month}-${created.day}`;
       const createdMins = parseInt(created.hour, 10) * 60 + parseInt(created.minute, 10);
@@ -525,24 +536,32 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
   const needsRotation = rotate || versionChanged;
 
-  // ── Build track record from previous day's picks ──
-  // Always ensure track records are built, even when returning cached picks.
+  // ── Build track records from ALL previous days that have picks but no track record ──
+  // Scan the last 10 trading days to catch any gaps (e.g. missed cron runs, cold starts).
   // For forced regeneration (cron), rebuild with potentially fresher closing data.
   // For regular requests, only build if no records exist yet for that day.
-  const prevKey = previousDateKey(dateKey);
-  const prev = store.daily_picks[prevKey];
   let trackRecordUpdated = false;
-  if (prev?.picks) {
-    const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
-    const shouldBuild = force || existingPrevRecords.length === 0;
-    if (shouldBuild) {
-      const rows = await Promise.all(
-        Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
-      );
-      for (const row of rows) {
-        upsertTrackRow(store.track_record, row);
+  {
+    let scanKey = dateKey;
+    for (let i = 0; i < 10; i++) {
+      const prevKey = previousDateKey(scanKey);
+      const prevPicks = store.daily_picks[prevKey];
+      if (prevPicks?.picks) {
+        const existingRecords = store.track_record.filter(r => r.date === prevKey);
+        const shouldBuild = force || existingRecords.length === 0;
+        if (shouldBuild) {
+          try {
+            const rows = await Promise.all(
+              Object.values(prevPicks.picks).map(pick => buildTrackRow(pick, prevKey))
+            );
+            for (const row of rows) {
+              upsertTrackRow(store.track_record, row);
+            }
+            trackRecordUpdated = true;
+          } catch { /* continue scanning older days even if one fails */ }
+        }
       }
-      trackRecordUpdated = true;
+      scanKey = prevKey;
     }
   }
 
@@ -574,13 +593,22 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const usedTickers = new Set();
   const excludedTickers = new Set();
 
-  // Auto-rotate daily: exclude previous trading day's picks so stocks change each day
-  if (prev?.picks) {
-    for (const p of Object.values(prev.picks)) {
-      if (p.ticker && p.ticker !== 'N/A') {
-        usedTickers.add(p.ticker);
-        excludedTickers.add(p.ticker);
+  // Auto-rotate daily: exclude previous TWO trading days' picks so stocks change each day
+  // Scanning 2 days back prevents the same stock appearing on consecutive days
+  {
+    let rotScanKey = dateKey;
+    for (let i = 0; i < 2; i++) {
+      const rotPrevKey = previousDateKey(rotScanKey);
+      const rotPrev = store.daily_picks[rotPrevKey];
+      if (rotPrev?.picks) {
+        for (const p of Object.values(rotPrev.picks)) {
+          if (p.ticker && p.ticker !== 'N/A') {
+            usedTickers.add(p.ticker);
+            excludedTickers.add(p.ticker);
+          }
+        }
       }
+      rotScanKey = rotPrevKey;
     }
   }
 
