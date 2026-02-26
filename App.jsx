@@ -408,7 +408,7 @@ export default function App() {
   };
 
   const loadTrackLive = async (id, force = false) => {
-    if (!force && trackLive[id]) return;
+    if (!force && trackLive[id]?.length > 0) return;
     try {
       const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8`);
       if (!r.ok) throw new Error(`Track record fetch failed`);
@@ -422,10 +422,15 @@ export default function App() {
         l: row.low,
         s: row.score,
       }));
-      setTrackLive(p => ({ ...p, [id]: rows }));
+      // If API returned rows, use them; otherwise fall back to static historical data
+      if (rows.length > 0) {
+        setTrackLive(p => ({ ...p, [id]: rows }));
+      } else {
+        setTrackLive(p => ({ ...p, [id]: HIST_MKT[id] || [] }));
+      }
     } catch {
-      // Only set empty if no data existed before — preserve stale data during refresh
-      setTrackLive(p => p[id] !== undefined ? p : { ...p, [id]: [] });
+      // On fetch error, fall back to static data if nothing loaded yet
+      setTrackLive(p => p[id]?.length > 0 ? p : { ...p, [id]: HIST_MKT[id] || [] });
     }
   };
 
@@ -764,7 +769,7 @@ export default function App() {
   useEffect(() => { loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]||[];
+  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]?.length > 0 ? trackLive[ac] : (HIST_MKT[ac] || []);
 
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
@@ -986,7 +991,7 @@ export default function App() {
 
   // TRACK RECORD
   const Track = () => {
-    const h = trackLive[ac] || [];
+    const h = trackLive[ac]?.length > 0 ? trackLive[ac] : (HIST_MKT[ac] || []);
     const isLoading = trackLive[ac] === undefined;
     const w = h.filter(p => p.c > p.e).length;
     const ar = h.length ? (h.reduce((a, p) => a + pctRet(p.e, p.c), 0) / h.length).toFixed(1) : "0";
