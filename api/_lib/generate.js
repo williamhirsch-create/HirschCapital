@@ -689,8 +689,18 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
 
 export const getTrackRecord = async (category, limit = 100) => {
   const store = await getStore();
+  // Determine the current trading day so we can exclude it.
+  // Today's pick performance should never appear until tomorrow's picks are generated.
+  const now = getNowInTzParts();
+  const todayStr = `${now.year}-${now.month}-${now.day}`;
   const rows = (store.track_record || [])
-    .filter((r) => !category || r.category === category)
+    .filter((r) => {
+      if (category && r.category !== category) return false;
+      // Exclude any rows for the current date — results should only appear
+      // after the next day's picks are chosen (built during next-day generation)
+      if (r.date === todayStr) return false;
+      return true;
+    })
     .sort((a, b) => (a.date < b.date ? 1 : -1));
   return rows.slice(0, limit);
 };

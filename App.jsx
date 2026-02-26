@@ -29,38 +29,8 @@ const SIGS = {
   hyper: ["Volatility Regime","Volume Dynamics","Gap Analysis","Trend Momentum","Volume Character","RSI Assessment","Trend Confirmation"],
 };
 
-const HIST = {
-  penny: [
-    {d:"Feb 14",t:"NVOS",e:1.12,c:1.38,h:1.52,l:1.05,s:82},{d:"Feb 13",t:"GFAI",e:0.87,c:0.74,h:0.95,l:0.68,s:76},
-    {d:"Feb 12",t:"MULN",e:0.34,c:0.52,h:0.61,l:0.31,s:88},{d:"Feb 11",t:"BBAI",e:2.15,c:2.68,h:2.89,l:2.10,s:79},
-    {d:"Feb 10",t:"AEMD",e:1.45,c:1.22,h:1.58,l:1.15,s:71},{d:"Feb 7",t:"CLOV",e:0.93,c:1.18,h:1.31,l:0.88,s:84},
-    {d:"Feb 6",t:"SOBR",e:0.56,c:0.48,h:0.62,l:0.44,s:68},{d:"Feb 5",t:"SNDL",e:1.88,c:2.24,h:2.45,l:1.82,s:81},
-  ],
-  small: [
-    {d:"Feb 14",t:"UPST",e:42.10,c:47.83,h:49.20,l:41.50,s:85},{d:"Feb 13",t:"AEHR",e:18.30,c:16.90,h:19.10,l:16.40,s:72},
-    {d:"Feb 12",t:"CELH",e:28.50,c:31.20,h:32.80,l:27.90,s:80},{d:"Feb 11",t:"IONQ",e:33.40,c:38.10,h:39.50,l:32.80,s:87},
-    {d:"Feb 10",t:"STEM",e:8.20,c:7.60,h:8.90,l:7.30,s:69},{d:"Feb 7",t:"ASTS",e:22.10,c:25.40,h:26.80,l:21.50,s:83},
-    {d:"Feb 6",t:"RKLB",e:19.80,c:21.50,h:22.30,l:19.20,s:78},{d:"Feb 5",t:"JOBY",e:7.40,c:8.10,h:8.60,l:7.10,s:74},
-  ],
-  mid: [
-    {d:"Feb 14",t:"CRWD",e:148.20,c:156.80,h:159.40,l:147.10,s:86},{d:"Feb 13",t:"ZS",e:82.30,c:79.10,h:84.20,l:78.50,s:73},
-    {d:"Feb 12",t:"DDOG",e:95.60,c:102.40,h:104.80,l:94.20,s:84},{d:"Feb 11",t:"NET",e:68.40,c:72.90,h:74.50,l:67.80,s:81},
-    {d:"Feb 10",t:"SNAP",e:12.80,c:11.90,h:13.20,l:11.50,s:67},{d:"Feb 7",t:"ROKU",e:78.50,c:84.30,h:86.10,l:77.20,s:82},
-    {d:"Feb 6",t:"BILL",e:55.20,c:58.90,h:60.40,l:54.50,s:79},{d:"Feb 5",t:"TWLO",e:63.80,c:67.20,h:68.90,l:62.90,s:77},
-  ],
-  large: [
-    {d:"Feb 14",t:"AMD",e:118.50,c:126.30,h:128.90,l:117.20,s:88},{d:"Feb 13",t:"NFLX",e:542.80,c:531.20,h:548.90,l:528.40,s:74},
-    {d:"Feb 12",t:"CRM",e:278.40,c:289.10,h:293.50,l:276.80,s:83},{d:"Feb 11",t:"TSLA",e:248.90,c:262.40,h:268.30,l:245.60,s:86},
-    {d:"Feb 10",t:"DIS",e:98.20,c:95.80,h:99.50,l:94.90,s:70},{d:"Feb 7",t:"PYPL",e:68.90,c:73.40,h:75.20,l:68.10,s:81},
-    {d:"Feb 6",t:"UBER",e:72.30,c:76.80,h:78.10,l:71.50,s:80},{d:"Feb 5",t:"SHOP",e:82.40,c:86.90,h:88.50,l:81.20,s:78},
-  ],
-  hyper: [
-    {d:"Feb 14",t:"NVDA",e:728.50,c:756.20,h:762.80,l:724.10,s:91},{d:"Feb 13",t:"META",e:478.30,c:468.90,h:482.50,l:465.20,s:76},
-    {d:"Feb 12",t:"MSFT",e:412.80,c:421.50,h:425.30,l:410.40,s:82},{d:"Feb 11",t:"GOOGL",e:148.20,c:155.80,h:157.40,l:147.50,s:85},
-    {d:"Feb 10",t:"AMZN",e:178.90,c:174.50,h:180.20,l:173.20,s:72},{d:"Feb 7",t:"AAPL",e:228.40,c:235.10,h:237.60,l:227.10,s:80},
-    {d:"Feb 6",t:"NVDA",e:712.30,c:738.50,h:745.20,l:708.80,s:89},{d:"Feb 5",t:"MSFT",e:405.60,c:415.20,h:418.80,l:403.90,s:81},
-  ],
-};
+// No static track record data — track record is built exclusively from live API data.
+// Results only appear after the algorithm has generated picks and recorded outcomes.
 
 // Static reference data — shown instantly on page load, then upgraded with live data in background.
 // Sources: Yahoo Finance, SEC filings, company investor relations. Values are representative snapshots.
@@ -157,7 +127,6 @@ const mktDay = (from = new Date()) => { const dt = new Date(from); let guard = 0
 const recentMktDays = (count, from = new Date()) => { const days = []; const cursor = mktDay(from); let guard = 0; while (days.length < count && guard++ < count + 60) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate() - 1); while (!isMktOpen(cursor) && guard++ < count + 60) cursor.setDate(cursor.getDate() - 1); } return days; };
 const fD = (dt) => dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const LIVE_DAY = mktDay();
-const HIST_MKT = Object.fromEntries(Object.entries(HIST).map(([id, rows]) => { const dts = recentMktDays(rows.length); return [id, rows.map((row, i) => ({ ...row, d: fD(dts[i]) }))]; }));
 
 const gP = (b, n, v = .03) => { const d = []; let p = b; const dts = recentMktDays(n + 1).reverse(); for (let i = 0; i < dts.length; i++) { const dt = dts[i]; p = Math.max(b * .5, p + (Math.random() - .45) * v * p); d.push({ date: fD(dt), price: +p.toFixed(2), volume: Math.floor(Math.random() * 8e6 + 2e6) }); } return d; };
 const gI = (o) => { const d = []; let p = o; for (let i = 0; i < 78; i++) { const h = 9 + Math.floor((i * 5 + 30) / 60), m = (i * 5 + 30) % 60; p = Math.max(o * .85, p + (Math.random() - .42) * .015 * p); d.push({ time: `${h}:${m.toString().padStart(2, "0")}`, price: +p.toFixed(2), volume: Math.floor(Math.random() * 5e5 + 1e5), vwap: +(p * (.98 + Math.random() * .04)).toFixed(2) }); } return d; };
@@ -422,15 +391,11 @@ export default function App() {
         l: row.low,
         s: row.score,
       }));
-      // If API returned rows, use them; otherwise fall back to static historical data
-      if (rows.length > 0) {
-        setTrackLive(p => ({ ...p, [id]: rows }));
-      } else {
-        setTrackLive(p => ({ ...p, [id]: HIST_MKT[id] || [] }));
-      }
+      // Only show live API data — no static fallbacks
+      setTrackLive(p => ({ ...p, [id]: rows }));
     } catch {
-      // On fetch error, fall back to static data if nothing loaded yet
-      setTrackLive(p => p[id]?.length > 0 ? p : { ...p, [id]: HIST_MKT[id] || [] });
+      // On fetch error, keep whatever we already have or set empty
+      setTrackLive(p => p[id]?.length > 0 ? p : { ...p, [id]: [] });
     }
   };
 
@@ -769,7 +734,7 @@ export default function App() {
   useEffect(() => { loadTrackLive(ac); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
-  const sigs = SIGS[ac]||[]; const hist = trackLive[ac]?.length > 0 ? trackLive[ac] : (HIST_MKT[ac] || []);
+  const sigs = SIGS[ac]||[]; const hist = trackLive[ac] || [];
 
   const ds = dataStatus[ac] || "loading";
   const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
@@ -991,7 +956,7 @@ export default function App() {
 
   // TRACK RECORD
   const Track = () => {
-    const h = trackLive[ac]?.length > 0 ? trackLive[ac] : (HIST_MKT[ac] || []);
+    const h = trackLive[ac] || [];
     const isLoading = trackLive[ac] === undefined;
     const w = h.filter(p => p.c > p.e).length;
     const ar = h.length ? (h.reduce((a, p) => a + pctRet(p.e, p.c), 0) / h.length).toFixed(1) : "0";
@@ -999,7 +964,7 @@ export default function App() {
     const maxRet = h.length ? Math.max(...h.map(p => pctRet(p.e, p.h))).toFixed(1) : "0";
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
-      <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses. Last 8 trading days of algorithm picks.</p>
+      <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses. Live results from algorithm picks, recorded after each day's close.</p>
       <Tabs s={{marginBottom:24}}/><Disc/>
       <div className="afu d2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:14,margin:"24px 0"}}>
         {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length} picks`,c:"var(--gn)"},{l:"Avg Return",v:`${Number(ar)>=0?"+":""}${ar}%`,s:"Entry to close",c:Number(ar)>=0?"var(--gn)":"var(--rd)"},{l:"Max Return",v:`${Number(maxRet)>=0?"+":""}${maxRet}%`,s:"Best single pick",c:Number(maxRet)>=0?"var(--gn)":"var(--rd)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
@@ -1013,7 +978,7 @@ export default function App() {
         <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:40,border:"1px solid var(--bd)",textAlign:"center"}}>
           <div style={{fontSize:36,marginBottom:12}}>📊</div>
           <div className="fs" style={{fontSize:16,fontWeight:600,marginBottom:8}}>No Track Record Yet</div>
-          <div className="fs" style={{color:"var(--mu)",fontSize:14,lineHeight:1.7,maxWidth:400,margin:"0 auto"}}>Track record data will appear here after the algorithm generates picks. Results from each day are recorded at 8:30 AM ET the following trading day.</div>
+          <div className="fs" style={{color:"var(--mu)",fontSize:14,lineHeight:1.7,maxWidth:400,margin:"0 auto"}}>Track record data will appear here once the algorithm has completed at least one full trading day. Each day's results are published the following morning when the next day's picks are chosen.</div>
         </div>
       ) : (
         <div className="afu d3" style={{background:"var(--cd)",borderRadius:16,padding:22,border:"1px solid var(--bd)"}}><TT data={h}/></div>
