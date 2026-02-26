@@ -1,4 +1,4 @@
-import { generateDailyPicks } from '../_lib/generate.js';
+import { generateDailyPicks, getNextTimeWindow } from '../_lib/generate.js';
 import { isPreMarketWindow, todayKey, isMarketDay } from '../_lib/date.js';
 
 export default async function handler(req, res) {
@@ -12,9 +12,23 @@ export default async function handler(req, res) {
     const key = todayKey();
     if (!isMarketDay(key)) return res.status(200).json({ ok: true, skipped: true, reason: `Market closed on ${key}` });
 
-    // Force regeneration to ensure picks use the freshest pre-market data
-    const data = await generateDailyPicks(key, { force: true });
-    res.status(200).json({ ok: true, date: data.date, generated: true, categories: Object.keys(data.picks || {}) });
+    // Pre-gate detection: if we're within 10 minutes before a gate (8:30 or 9:30),
+    // generate picks using the NEXT time window's exploration seeds.
+    // This ensures picks are ready and cached BEFORE the gate fires,
+    // so at 8:30/9:30 the frontend gets instant results with no regeneration.
+    const nextWindow = getNextTimeWindow();
+    const opts = { force: true };
+    if (nextWindow) {
+      opts.timeWindowOverride = nextWindow;
+    }
+
+    const data = await generateDailyPicks(key, opts);
+    res.status(200).json({
+      ok: true, date: data.date, generated: true,
+      preGenerated: !!nextWindow,
+      timeWindow: nextWindow || data._learning?.time_window,
+      categories: Object.keys(data.picks || {}),
+    });
   } catch (e) {
     res.status(500).json({ error: 'Cron failed', detail: String(e?.message || e) });
   }
