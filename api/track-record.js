@@ -1,23 +1,13 @@
-import { getTrackRecord, generateDailyPicks } from './_lib/generate.js';
-import { todayKey, isMarketDay, previousTradingDay } from './_lib/date.js';
+import { getTrackRecord } from './_lib/generate.js';
 
 export default async function handler(req, res) {
   try {
     const category = typeof req.query.category === 'string' ? req.query.category : undefined;
     const limit = Number.parseInt(req.query.limit || '100', 10);
 
-    // Ensure track records are built: trigger a lightweight pick generation
-    // which builds track records from the previous day's picks as a side effect.
-    // This handles the case where the user visits the track record page before
-    // the cron or picks API has run today.
-    try {
-      let key = todayKey();
-      if (!isMarketDay(key)) key = previousTradingDay(key);
-      await generateDailyPicks(key, { force: false });
-    } catch {
-      // Non-critical — proceed with whatever track records exist
-    }
-
+    // Only serve track records that have already been built.
+    // Track records are built as a side-effect of pick generation (cron or /api/today),
+    // ensuring a day's results only appear after the next day's picks are chosen.
     const rows = await getTrackRecord(category, Number.isFinite(limit) ? limit : 100);
     res.status(200).json({ rows });
   } catch (e) {
