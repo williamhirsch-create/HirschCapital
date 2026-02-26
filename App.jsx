@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
 
 const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
-// One-time force refresh: on this date (ET), the initial page load will
-// bypass cached picks and regenerate all categories + track records fresh.
-const FORCE_REFRESH_DATE = '2026-02-26';
+// Force-refresh dates: on these dates (ET), every page load bypasses cached
+// picks and regenerates all categories + track records with fresh market data.
+const FORCE_REFRESH_DATES = new Set(['2026-02-26']);
 
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
@@ -653,12 +653,13 @@ export default function App() {
   };
 
   // Start preloading all data immediately on mount
-  // If today matches FORCE_REFRESH_DATE, force the backend to regenerate all picks fresh
+  // On force-refresh dates, bypass all caches so every category gets fresh market data
+  const isForceRefreshDay = useRef(FORCE_REFRESH_DATES.has(getETDate()));
   const preloadStarted = useRef(false);
   useEffect(() => {
     if (!preloadStarted.current) {
       preloadStarted.current = true;
-      const forceToday = getETDate() === FORCE_REFRESH_DATE;
+      const forceToday = isForceRefreshDay.current;
       preloadAllData({ forceRefresh: forceToday, isGateRefresh: forceToday });
     }
   }, []);
@@ -736,8 +737,8 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // When switching categories, load track data if not already loaded
-  useEffect(() => { loadTrackLive(ac); }, [ac]);
+  // When switching categories, load track data (force on force-refresh dates)
+  useEffect(() => { loadTrackLive(ac, isForceRefreshDay.current); }, [ac]);
 
   const pk = picks[ac]; const cc = (charts[ac]||{})[tf]||[]; const cat = CATS.find(c=>c.id===ac);
   const sigs = SIGS[ac]||[]; const hist = trackLive[ac] || [];
