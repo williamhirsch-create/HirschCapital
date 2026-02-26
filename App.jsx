@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
 
 const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
+// One-time force refresh: on this date (ET), the initial page load will
+// bypass cached picks and regenerate all categories + track records fresh.
+const FORCE_REFRESH_DATE = '2026-02-26';
+
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
   const p = window.location.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
@@ -649,11 +653,13 @@ export default function App() {
   };
 
   // Start preloading all data immediately on mount
+  // If today matches FORCE_REFRESH_DATE, force the backend to regenerate all picks fresh
   const preloadStarted = useRef(false);
   useEffect(() => {
     if (!preloadStarted.current) {
       preloadStarted.current = true;
-      preloadAllData();
+      const forceToday = getETDate() === FORCE_REFRESH_DATE;
+      preloadAllData({ forceRefresh: forceToday, isGateRefresh: forceToday });
     }
   }, []);
 
