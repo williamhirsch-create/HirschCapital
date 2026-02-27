@@ -507,6 +507,11 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   store.daily_picks ||= {};
   store.track_record ||= [];
 
+  // When force=true, delete the cached entry for today so we start completely fresh
+  if (force && store.daily_picks[dateKey]) {
+    delete store.daily_picks[dateKey];
+  }
+
   // Return cached picks only if same algorithm version, picks have real data, AND not stale
   const cached = store.daily_picks[dateKey];
   const cachedHasRealData = cached && Object.values(cached.picks || {}).some(p => p.hirsch_score > 0);

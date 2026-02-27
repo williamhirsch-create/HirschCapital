@@ -100,6 +100,8 @@ export default async function handler(req, res) {
     // Double-check: only include formatted values that look like valid short numeric strings
     const validMetric = (v) => v && typeof v === 'string' && v.length <= 20 && /^[\$]?[\d,.]+\s*[BKMTX%]?[BKMTX%]?$/i.test(v.trim());
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     return res.status(200).json({
       symbol: q.symbol,
       price: q.regularMarketPrice,

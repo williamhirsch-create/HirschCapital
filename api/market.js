@@ -51,6 +51,8 @@ export default async function handler(req, res) {
       volume: quote.volume?.[i],
     })).filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.close));
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     return res.status(200).json({
       symbol,
       range,
