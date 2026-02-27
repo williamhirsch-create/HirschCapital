@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
 
 const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
@@ -196,6 +196,20 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// Stable component defined outside App — React can reconcile it across renders
+// so category switches are always reflected in both the tabs and content.
+const CategoryTabs = ({ activeId, onSelect, style }) => (
+  <div className="ct fs" style={style}>
+    {CATS.map(c => (
+      <button key={c.id} className={`cb${activeId === c.id ? " on" : ""}`}
+        onClick={() => onSelect(c.id)}
+        style={activeId === c.id ? { color: c.color } : {}}>
+        <span>{c.icon}</span>{c.short}
+      </button>
+    ))}
+  </div>
+);
+
 export default function App() {
   const [pg, setPg] = useState(() => pageFromPath());
   const [ac, setAc] = useState("penny");
@@ -214,6 +228,8 @@ export default function App() {
   useEffect(() => { const h = () => setPg(pageFromPath()); window.addEventListener("popstate", h); return () => window.removeEventListener("popstate", h); }, []);
 
   const [trackLive, setTrackLive] = useState({});
+  const trackLiveRef = useRef(trackLive);
+  useEffect(() => { trackLiveRef.current = trackLive; }, [trackLive]);
 
   const fetchMarket = async (ticker, tf = "1M") => {
     const cfg = TF_CFG[tf] || TF_CFG["1M"];
@@ -381,7 +397,7 @@ export default function App() {
   };
 
   const loadTrackLive = async (id, force = false) => {
-    if (!force && trackLive[id]?.length > 0) return;
+    if (!force && trackLiveRef.current[id]?.length > 0) return;
     try {
       const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8`);
       if (!r.ok) throw new Error(`Track record fetch failed`);
@@ -743,7 +759,7 @@ export default function App() {
   const sigs = SIGS[ac]||[]; const hist = trackLive[ac] || [];
 
   const ds = dataStatus[ac] || "loading";
-  const Tabs = ({s}) => (<div className="ct fs" style={s}>{CATS.map(c=>(<button key={c.id} className={`cb${ac===c.id?" on":""}`} onClick={()=>{setAc(c.id);setTf("1D");}} style={ac===c.id?{color:c.color}:{}}><span>{c.icon}</span>{c.short}</button>))}</div>);
+  const handleTabSelect = useCallback((id) => { setAc(id); setTf("1D"); }, []);
   const DataBadge = () => {
     const cfg = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, static: { bg: "var(--al)", color: "var(--ac)", text: "Reference Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Updating..." } };
     const c = cfg[ds] || cfg.static;
@@ -846,7 +862,7 @@ export default function App() {
     const sb=pk.thesis_summary?.split("|")||[];const rk=pk.risks?.split("|")||[];const iv=pk.invalidation?.split("|")||[];
     const sv=pk.signal_values?.split("|")||[];const sw=pk.signal_weights?.split("|")||[];const sr=pk.signal_reasons?.split("|")||[];
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
-      <Tabs s={{marginBottom:28}}/>
+      <CategoryTabs activeId={ac} onSelect={handleTabSelect} style={{marginBottom:28}}/>
       <div className="afu">
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span><DataBadge/></div>
         <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}><h1 className="ff" style={{fontSize:"clamp(34px,5vw,50px)",letterSpacing:"-.03em"}}>{pk.ticker}</h1><span className="fs" style={{fontSize:15,color:"var(--mu)"}}>{pk.company} · {pk.exchange}</span></div>
@@ -971,7 +987,7 @@ export default function App() {
     return(<div style={{maxWidth:1000,margin:"0 auto",padding:"100px 24px 60px"}}>
       <h1 className="ff afu" style={{fontSize:40,marginBottom:6,letterSpacing:"-.02em"}}>Track Record</h1>
       <p className="fs afu d1" style={{color:"var(--mu)",marginBottom:24}}>Full transparency — wins and losses. Live results from algorithm picks, recorded after each day's close.</p>
-      <Tabs s={{marginBottom:24}}/><Disc/>
+      <CategoryTabs activeId={ac} onSelect={handleTabSelect} style={{marginBottom:24}}/><Disc/>
       <div className="afu d2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:14,margin:"24px 0"}}>
         {[{l:"Win Rate",v:`${h.length?((w/h.length)*100).toFixed(0):0}%`,s:`${w}/${h.length} picks`,c:"var(--gn)"},{l:"Avg Return",v:`${Number(ar)>=0?"+":""}${ar}%`,s:"Entry to close",c:Number(ar)>=0?"var(--gn)":"var(--rd)"},{l:"Max Return",v:`${Number(maxRet)>=0?"+":""}${maxRet}%`,s:"Best single pick",c:Number(maxRet)>=0?"var(--gn)":"var(--rd)"},{l:"Total Picks",v:h.length,s:cat.label,c:cat.color}].map((s,i)=>(<div key={i} style={{background:"var(--cd)",borderRadius:14,padding:20,border:"1px solid var(--bd)"}}><div className="fs" style={{fontSize:10,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{s.l}</div><div className="fs" style={{fontSize:26,fontWeight:700,color:s.c}}>{s.v}</div><div className="fs" style={{fontSize:12,color:"var(--mu)",marginTop:2}}>{s.s}</div></div>))}
       </div>
