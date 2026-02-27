@@ -204,6 +204,8 @@ export default async function handler(req, res) {
     const openRaw = extractStat('Open');
     if (openRaw) result.open = parseFloat(String(openRaw).replace(/[,$]/g, ''));
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({ error: 'Unexpected gfinance proxy error.', detail: String(err?.message || err) });

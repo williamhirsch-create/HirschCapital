@@ -399,7 +399,9 @@ export default function App() {
   const loadTrackLive = async (id, force = false) => {
     if (!force && trackLiveRef.current[id]?.length > 0) return;
     try {
-      const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8`);
+      // Cache-bust with timestamp when forced to defeat any CDN caching
+      const bust = force ? `&_t=${Date.now()}` : '';
+      const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8${bust}`, force ? { cache: 'no-store' } : {});
       if (!r.ok) throw new Error(`Track record fetch failed`);
       const data = await r.json();
       const rows = (data.rows || []).map(row => ({
@@ -424,7 +426,9 @@ export default function App() {
   const fetchApiPicks = async ({ force = false } = {}) => {
     if (!force && apiPicksRef.current) return apiPicksRef.current;
     try {
-      const url = force ? "/api/today?force=true" : "/api/today";
+      // Cache-bust with timestamp to defeat any CDN/browser caching layer
+      const bust = force ? `&_t=${Date.now()}` : '';
+      const url = force ? `/api/today?force=true${bust}` : "/api/today";
       const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) return null;
       const data = await r.json();
@@ -436,7 +440,8 @@ export default function App() {
       // Retry once on network failure after a brief delay
       try {
         await new Promise(r => setTimeout(r, 2000));
-        const url = force ? "/api/today?force=true" : "/api/today";
+        const bust = force ? `&_t=${Date.now()}` : '';
+        const url = force ? `/api/today?force=true${bust}` : "/api/today";
         const r = await fetch(url, { cache: 'no-store' });
         if (!r.ok) return null;
         const data = await r.json();
@@ -675,6 +680,12 @@ export default function App() {
     if (!preloadStarted.current) {
       preloadStarted.current = true;
       const forceToday = getETDate() === FORCE_REFRESH_DATE;
+      if (forceToday) {
+        // Aggressively clear ALL caches so every request fetches fresh data
+        apiPicksRef.current = null;
+        quoteCacheRef.current = {};
+        gfCacheRef.current = {};
+      }
       preloadAllData({ forceRefresh: forceToday, isGateRefresh: forceToday });
     }
   }, []);
