@@ -4,7 +4,7 @@ const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
 // One-time force refresh: on this date (ET), the initial page load will
 // bypass cached picks and regenerate all categories + track records fresh.
-const FORCE_REFRESH_DATE = '2026-02-27';
+const FORCE_REFRESH_DATE = '2026-03-06';
 
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
@@ -196,8 +196,17 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Stable component defined outside App — React can reconcile it across renders
-// so category switches are always reflected in both the tabs and content.
+// Stable components defined outside App — React can reconcile them across renders
+// so state changes don't cause full unmount/remount (which causes flickering).
+const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
+
+const TT = ({data,limit}) => (<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} className="fs"><thead><tr style={{borderBottom:"2px solid var(--bd)"}}>{["Date","Ticker","Entry","Close","High","Low","Return","Max Run","Score"].map(h=>(<th key={h} style={{padding:"10px",textAlign:"left",fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em"}}>{h}</th>))}</tr></thead><tbody>{(data||[]).slice(0,limit||999).map((p,i)=>{const retNum=pctRet(p.e,p.c);const mrNum=pctRet(p.e,p.h);const ret=retNum.toFixed(1);const mr=mrNum.toFixed(1);return(<tr key={i} style={{borderBottom:"1px solid var(--bd)"}} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><td style={{padding:"11px 10px",fontSize:13,color:"var(--mu)"}}>{p.d}</td><td style={{padding:"11px 10px",fontSize:14,fontWeight:700}}>{p.t}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.e||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.c||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--gn)"}}>${Number(p.h||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--rd)"}}>${Number(p.l||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:retNum>=0?"var(--gn)":"var(--rd)"}}>{retNum>=0?"+":""}{ret}%</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:mrNum>=0?"var(--gn)":"var(--rd)"}}>{mrNum>=0?"+":""}{mr}%</td><td style={{padding:"11px 10px"}}><span style={{background:p.s>=80?"var(--gl)":"var(--al)",color:p.s>=80?"var(--gn)":"var(--ac)",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{p.s}</span></td></tr>);})}</tbody></table></div>);
+
+const DATA_BADGE_CFG = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, static: { bg: "var(--al)", color: "var(--ac)", text: "Reference Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Updating..." } };
+const DataBadge = ({ status }) => {
+  const c = DATA_BADGE_CFG[status] || DATA_BADGE_CFG.static;
+  return (<span className="fs" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, background: c.bg, color: c.color }}>{status === "live" && <span className="ld" style={{ width: 6, height: 6 }} />}{c.text}</span>);
+};
 const CategoryTabs = ({ activeId, onSelect, style }) => (
   <div className="ct fs" style={style}>
     {CATS.map(c => (
@@ -771,14 +780,7 @@ export default function App() {
 
   const ds = dataStatus[ac] || "loading";
   const handleTabSelect = useCallback((id) => { setAc(id); setTf("1D"); }, []);
-  const DataBadge = () => {
-    const cfg = { live: { bg: "var(--gl)", color: "var(--gn)", text: "Live Data" }, delayed: { bg: "var(--aml)", color: "#92400E", text: "Delayed" }, offline: { bg: "var(--rl)", color: "var(--rd)", text: "Simulated Data" }, static: { bg: "var(--al)", color: "var(--ac)", text: "Reference Data" }, loading: { bg: "#F3F4F6", color: "var(--mu)", text: "Updating..." } };
-    const c = cfg[ds] || cfg.static;
-    return (<span className="fs" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, background: c.bg, color: c.color }}>{ds === "live" && <span className="ld" style={{ width: 6, height: 6 }} />}{c.text}</span>);
-  };
-  const Disc = () => (<div style={{background:"var(--aml)",borderLeft:"4px solid var(--am)",padding:"12px 18px",borderRadius:"0 8px 8px 0",fontSize:13,color:"#92400E",lineHeight:1.6}} className="fs">⚠️ <strong>Educational content only.</strong> Hirsch Capital does not provide investment advice. All equities carry risk. Past performance is not predictive.</div>);
-
-  const TT = ({data,limit}) => (<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} className="fs"><thead><tr style={{borderBottom:"2px solid var(--bd)"}}>{["Date","Ticker","Entry","Close","High","Low","Return","Max Run","Score"].map(h=>(<th key={h} style={{padding:"10px",textAlign:"left",fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em"}}>{h}</th>))}</tr></thead><tbody>{(data||[]).slice(0,limit||999).map((p,i)=>{const retNum=pctRet(p.e,p.c);const mrNum=pctRet(p.e,p.h);const ret=retNum.toFixed(1);const mr=mrNum.toFixed(1);return(<tr key={i} style={{borderBottom:"1px solid var(--bd)"}} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><td style={{padding:"11px 10px",fontSize:13,color:"var(--mu)"}}>{p.d}</td><td style={{padding:"11px 10px",fontSize:14,fontWeight:700}}>{p.t}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.e||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13}}>${Number(p.c||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--gn)"}}>${Number(p.h||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,color:"var(--rd)"}}>${Number(p.l||0).toFixed(2)}</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:retNum>=0?"var(--gn)":"var(--rd)"}}>{retNum>=0?"+":""}{ret}%</td><td style={{padding:"11px 10px",fontSize:13,fontWeight:600,color:mrNum>=0?"var(--gn)":"var(--rd)"}}>{mrNum>=0?"+":""}{mr}%</td><td style={{padding:"11px 10px"}}><span style={{background:p.s>=80?"var(--gl)":"var(--al)",color:p.s>=80?"var(--gn)":"var(--ac)",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{p.s}</span></td></tr>);})}</tbody></table></div>);
+  // DataBadge, Disc, TT are now defined outside App for stable identity
 
   // NAV
   const Nav = () => (<nav style={{position:"fixed",top:0,left:0,right:0,zIndex:100,padding:sc?"10px 0":"16px 0",background:sc?"rgba(250,250,248,.88)":"transparent",backdropFilter:sc?"blur(20px)":"none",borderBottom:sc?"1px solid var(--bd)":"none",transition:"all .3s"}} className="fs">
@@ -875,7 +877,7 @@ export default function App() {
     return(<div style={{maxWidth:940,margin:"0 auto",padding:"100px 24px 60px"}}>
       <CategoryTabs activeId={ac} onSelect={handleTabSelect} style={{marginBottom:28}}/>
       <div className="afu">
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span><DataBadge/></div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}><span className="ld"/><span className="fs" style={{fontSize:12,color:cat.color,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{cat.label} Pick — {LIVE_DAY.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span><DataBadge status={ds}/></div>
         <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}><h1 className="ff" style={{fontSize:"clamp(34px,5vw,50px)",letterSpacing:"-.03em"}}>{pk.ticker}</h1><span className="fs" style={{fontSize:15,color:"var(--mu)"}}>{pk.company} · {pk.exchange}</span></div>
         <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>{[cat.label,"High Volatility","Educational Only"].map(b=>(<span key={b} className="fs" style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:6,background:b.includes("Vol")?"var(--rl)":b.includes("Edu")?"var(--aml)":"var(--al)",color:b.includes("Vol")?"var(--rd)":b.includes("Edu")?"#92400E":cat.color,textTransform:"uppercase",letterSpacing:".05em"}}>{b}</span>))}</div>
       </div>
@@ -1062,21 +1064,25 @@ export default function App() {
     </div>
   </footer>);
 
+  // Call inner render functions as regular functions (not <Component/>) so React
+  // reconciles the returned elements by position/type instead of treating them as
+  // new component types on every render — this eliminates the flickering caused by
+  // full unmount/remount cycles when component identity changes.
   return(<ErrorBoundary><div className="fs" style={{background:"var(--bg)",minHeight:"100vh",color:"var(--tx)"}}>
-    <style>{CSS}</style><Nav/>
+    <style>{CSS}</style>{Nav()}
     {!preloadReady ? (
       <div style={{minHeight:"calc(100vh - 80px)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <PreloadScreen/>
+        {PreloadScreen()}
       </div>
     ) : (
       <>
-        {pg==="home"&&<Home/>}
-        {pg==="pick"&&<Pick/>}
-        {pg==="track"&&<Track/>}
-        {pg==="method"&&<Method/>}
-        {pg==="about"&&<About/>}
+        {pg==="home"&&Home()}
+        {pg==="pick"&&Pick()}
+        {pg==="track"&&Track()}
+        {pg==="method"&&Method()}
+        {pg==="about"&&About()}
       </>
     )}
-    <Foot/>
+    {Foot()}
   </div></ErrorBoundary>);
 }
