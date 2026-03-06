@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "api/today.js": { "maxDuration": 30 },
+    "api/cron/daily-picks.js": { "maxDuration": 60 }
+  },
   "crons": [
     { "path": "/api/cron/daily-picks", "schedule": "0,15,27,30,45 12,13,14 * * 1-5" }
   ],

@@ -1,6 +1,16 @@
 const YF_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/** Per-request timeout (ms) — prevents a single slow call from blocking the entire function */
+const REQUEST_TIMEOUT_MS = 8000;
+
+/** Fetch with a timeout — rejects if the request takes too long */
+const fetchWithTimeout = (url, opts, timeoutMs = REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 /** Fetch from Yahoo Finance with automatic host fallback (query1 → query2) */
 const yfFetch = async (path, params) => {
   const qs = new URLSearchParams(params).toString();
@@ -8,7 +18,7 @@ const yfFetch = async (path, params) => {
   for (const host of YF_HOSTS) {
     try {
       const url = `https://${host}${path}?${qs}`;
-      const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
+      const r = await fetchWithTimeout(url, { headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
       if (r.ok) return r;
       lastErr = new Error(`HTTP ${r.status} from ${host}`);
     } catch (e) {
@@ -98,6 +108,39 @@ export const computeRSI = (points, period = 14) => {
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return +(100 - 100 / (1 + rs)).toFixed(1);
+};
+
+/** Quick score from quote data alone — used to pre-filter candidates before fetching charts.
+ *  Returns a 0-100 rough score based on volume surge, gap, and momentum indicators. */
+export const quickScoreFromQuote = (quote) => {
+  if (!quote) return 0;
+  let score = 50; // baseline
+  // Volume surge: higher relative volume = more interesting
+  const vol3m = quote.averageDailyVolume3Month || quote.averageDailyVolume10Day || 0;
+  const todayVol = quote.regularMarketVolume || 0;
+  if (vol3m > 0 && todayVol > 0) {
+    const rv = todayVol / vol3m;
+    score += Math.min(20, rv * 8); // up to +20 for high relative volume
+  }
+  // Gap: larger absolute gap = stronger catalyst
+  const prevClose = quote.regularMarketPreviousClose;
+  const open = quote.regularMarketOpen;
+  if (prevClose > 0 && open > 0) {
+    const gap = Math.abs((open - prevClose) / prevClose * 100);
+    score += Math.min(15, gap * 3);
+  }
+  // Pre-market activity
+  if (quote.preMarketVolume > 0) score += 5;
+  // Recent momentum: 52-week positioning
+  const price = quote.regularMarketPrice;
+  const hi52 = quote.fiftyTwoWeekHigh;
+  const lo52 = quote.fiftyTwoWeekLow;
+  if (price > 0 && hi52 > lo52 && lo52 > 0) {
+    const pos = (price - lo52) / (hi52 - lo52); // 0=at low, 1=at high
+    // Prefer stocks in the 30-70% range (not at extremes)
+    score += pos > 0.3 && pos < 0.7 ? 10 : pos > 0.15 && pos < 0.85 ? 5 : 0;
+  }
+  return Math.min(100, Math.round(score));
 };
 
 /** Compute all live metrics from chart data and optional quote data */
