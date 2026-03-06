@@ -1,5 +1,5 @@
 import { CANDIDATES, CATEGORIES, SITE_TIMEZONE, SIGNAL_LABELS, SIGNAL_WEIGHTS, ALGO_VERSION } from './constants.js';
-import { fetchChart, fetchQuotes, computeMetrics } from './market.js';
+import { fetchChart, fetchQuotes, computeMetrics, quickScoreFromQuote } from './market.js';
 import { getStore, setStore, upsertTrackRow } from './store.js';
 import { previousDateKey, getNowInTzParts } from './date.js';
 
@@ -297,27 +297,39 @@ const generateThesis = (ticker, company, m, categoryId, catLabel) => {
  *  @param opts.dateKey      - current date key (for exploration seed)
  *  @param opts.timeWindow   - current time window (for exploration seed)
  *  @param opts.tickerHistory - per-ticker performance history */
+/** Maximum number of chart fetches per category — limits Yahoo Finance calls to stay within Vercel timeout.
+ *  Batch quotes (1 call per category) pre-filter candidates; only the top N get chart fetches. */
+const MAX_CHARTS_PER_CATEGORY = 5;
+
 const fetchAndEnrichCandidates = async (categoryId, opts = {}) => {
   const { learnedAdj, dateKey, timeWindow, tickerHistory } = opts;
   const cat = CATEGORIES.find(c => c.id === categoryId);
   const tickers = (CANDIDATES[categoryId] || []).map(c => c.ticker);
   if (!tickers.length || !cat) return [];
 
-  // Try batch quote endpoint for market cap and real-time data
+  // Step 1: Batch quote fetch (single call for all 15 candidates)
   const quotes = await fetchQuotes(tickers);
   const quoteMap = {};
   if (quotes) {
     for (const q of quotes) quoteMap[q.symbol] = q;
   }
 
-  // Fetch 1-month daily charts for all candidates in parallel
+  // Step 2: Pre-filter using quote-only quick scores — only fetch charts for the top candidates.
+  // This reduces Yahoo Finance chart calls from 15 to MAX_CHARTS_PER_CATEGORY per category
+  // (75 total → 25 total), keeping well within Vercel's function timeout.
+  const ranked = tickers
+    .map(ticker => ({ ticker, qScore: quickScoreFromQuote(quoteMap[ticker]) }))
+    .sort((a, b) => b.qScore - a.qScore);
+  const chartTickers = ranked.slice(0, MAX_CHARTS_PER_CATEGORY).map(r => r.ticker);
+
+  // Step 3: Fetch 1-month daily charts only for top candidates
   const chartResults = await Promise.allSettled(
-    tickers.map(t => fetchChart(t, '1mo', '1d'))
+    chartTickers.map(t => fetchChart(t, '1mo', '1d'))
   );
 
   const enriched = [];
-  for (let i = 0; i < tickers.length; i++) {
-    const ticker = tickers[i];
+  for (let i = 0; i < chartTickers.length; i++) {
+    const ticker = chartTickers[i];
     const info = CANDIDATES[categoryId].find(c => c.ticker === ticker);
     const chart = chartResults[i].status === 'fulfilled' ? chartResults[i].value : null;
     if (!chart || !chart.points?.length) continue;
@@ -554,29 +566,37 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   const versionChanged = cached?.version !== undefined && cached.version !== ALGO_VERSION;
   const needsRotation = rotate || versionChanged;
 
-  // ── Build track record from previous day's picks ──
-  // Always ensure track records are built, even when returning cached picks.
-  // Build if: forced, OR no records exist yet, OR existing records have zero entry prices.
-  const prevKey = previousDateKey(dateKey);
-  const prev = store.daily_picks[prevKey];
+  // ── Build track records from previous days' picks ──
+  // Scan back up to MAX_TRACK_BACKFILL days to bootstrap track records when the
+  // KV store is fresh or missing entries. This ensures the track record isn't
+  // permanently empty just because yesterday's picks weren't stored yet.
+  const MAX_TRACK_BACKFILL = 5;
   let trackRecordUpdated = false;
-  if (prev?.picks) {
-    const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
-    const expectedCount = Object.keys(prev.picks).length;
-    const hasValidRecords = existingPrevRecords.length >= expectedCount &&
-      existingPrevRecords.every(r => r.reference_price > 0 && r.close > 0);
-    const shouldBuild = force || !hasValidRecords;
-    if (shouldBuild) {
-      // Build rows individually — one failure shouldn't prevent other categories
-      const results = await Promise.allSettled(
-        Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
-      );
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          upsertTrackRow(store.track_record, result.value);
-          trackRecordUpdated = true;
+  {
+    let scanKey = dateKey;
+    for (let i = 0; i < MAX_TRACK_BACKFILL; i++) {
+      const prevKey = previousDateKey(scanKey);
+      const prev = store.daily_picks[prevKey];
+      if (prev?.picks) {
+        const existingPrevRecords = store.track_record.filter(r => r.date === prevKey);
+        const expectedCount = Object.keys(prev.picks).length;
+        const hasValidRecords = existingPrevRecords.length >= expectedCount &&
+          existingPrevRecords.every(r => r.reference_price > 0 && r.close > 0);
+        const shouldBuild = force || !hasValidRecords;
+        if (shouldBuild) {
+          // Build rows individually — one failure shouldn't prevent other categories
+          const results = await Promise.allSettled(
+            Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
+          );
+          for (const result of results) {
+            if (result.status === 'fulfilled' && result.value) {
+              upsertTrackRow(store.track_record, result.value);
+              trackRecordUpdated = true;
+            }
+          }
         }
       }
+      scanKey = prevKey;
     }
   }
 

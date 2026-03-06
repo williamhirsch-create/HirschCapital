@@ -4,7 +4,7 @@ const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
 // One-time force refresh: on this date (ET), the initial page load will
 // bypass cached picks and regenerate all categories + track records fresh.
-const FORCE_REFRESH_DATE = '2026-03-06';
+const FORCE_REFRESH_DATE = '2026-03-07';
 
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
@@ -431,14 +431,20 @@ export default function App() {
   };
 
   // Fetch all picks from the backend API (uses live market data)
+  // Includes a 25-second timeout to avoid hanging when Vercel functions are slow
   const apiPicksRef = useRef(null);
+  const fetchWithTimeout = (url, opts = {}, timeoutMs = 25000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+  };
   const fetchApiPicks = async ({ force = false } = {}) => {
     if (!force && apiPicksRef.current) return apiPicksRef.current;
     try {
       // Cache-bust with timestamp to defeat any CDN/browser caching layer
       const bust = force ? `&_t=${Date.now()}` : '';
       const url = force ? `/api/today?force=true${bust}` : "/api/today";
-      const r = await fetch(url, { cache: 'no-store' });
+      const r = await fetchWithTimeout(url, { cache: 'no-store' });
       if (!r.ok) return null;
       const data = await r.json();
       // Only cache if picks have real scored data
@@ -451,7 +457,7 @@ export default function App() {
         await new Promise(r => setTimeout(r, 2000));
         const bust = force ? `&_t=${Date.now()}` : '';
         const url = force ? `/api/today?force=true${bust}` : "/api/today";
-        const r = await fetch(url, { cache: 'no-store' });
+        const r = await fetchWithTimeout(url, { cache: 'no-store' });
         if (!r.ok) return null;
         const data = await r.json();
         const hasRealData = Object.values(data?.picks || {}).some(p => p.hirsch_score > 0);
