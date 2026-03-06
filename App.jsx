@@ -4,7 +4,7 @@ const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
 // One-time force refresh: on this date (ET), the initial page load will
 // bypass cached picks and regenerate all categories + track records fresh.
-const FORCE_REFRESH_DATE = '2026-03-07';
+const FORCE_REFRESH_DATE = '2026-03-06';
 
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
