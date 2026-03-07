@@ -570,9 +570,16 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   // Scan back up to MAX_TRACK_BACKFILL days to bootstrap track records when the
   // KV store is fresh or missing entries. This ensures the track record isn't
   // permanently empty just because yesterday's picks weren't stored yet.
+  //
+  // Perf: all days are fetched in ONE parallel batch (not sequentially day-by-day)
+  // to stay well within the 30-second /api/today timeout. Force-refresh only
+  // regenerates picks — track records are only rebuilt when actually invalid,
+  // avoiding 25 unnecessary chart fetches on force.
   const MAX_TRACK_BACKFILL = 5;
   let trackRecordUpdated = false;
   {
+    // Collect all (pick, dateKey) pairs that need building across all backfill days
+    const backfillJobs = [];
     let scanKey = dateKey;
     for (let i = 0; i < MAX_TRACK_BACKFILL; i++) {
       const prevKey = previousDateKey(scanKey);
@@ -582,21 +589,28 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
         const expectedCount = Object.keys(prev.picks).length;
         const hasValidRecords = existingPrevRecords.length >= expectedCount &&
           existingPrevRecords.every(r => r.reference_price > 0 && r.close > 0);
-        const shouldBuild = force || !hasValidRecords;
-        if (shouldBuild) {
-          // Build rows individually — one failure shouldn't prevent other categories
-          const results = await Promise.allSettled(
-            Object.values(prev.picks).map(pick => buildTrackRow(pick, prevKey))
-          );
-          for (const result of results) {
-            if (result.status === 'fulfilled' && result.value) {
-              upsertTrackRow(store.track_record, result.value);
-              trackRecordUpdated = true;
-            }
+        // Only rebuild when records are actually missing/invalid — force flag is
+        // for regenerating picks, not re-fetching already-valid track records.
+        if (!hasValidRecords) {
+          for (const pick of Object.values(prev.picks)) {
+            backfillJobs.push({ pick, prevKey });
           }
         }
       }
       scanKey = prevKey;
+    }
+
+    // Run ALL backfill chart fetches in a single parallel batch
+    if (backfillJobs.length > 0) {
+      const results = await Promise.allSettled(
+        backfillJobs.map(({ pick, prevKey }) => buildTrackRow(pick, prevKey))
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          upsertTrackRow(store.track_record, result.value);
+          trackRecordUpdated = true;
+        }
+      }
     }
   }
 
