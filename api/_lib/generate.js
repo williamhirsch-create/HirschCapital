@@ -43,12 +43,13 @@ const getNextTimeWindow = () => {
    Stocks we haven't picked or that have strong track records get
    higher bonuses, injecting non-determinism into the ranking.
    ══════════════════════════════════════════════════════════════════ */
-const computeExplorationBonus = (ticker, dateKey, timeWindow, tickerHistory) => {
+const computeExplorationBonus = (ticker, dateKey, timeWindow, tickerHistory, forceSeed = '') => {
   // Use a stronger date+ticker seed so each day produces meaningfully different rankings
-  const seed = `${ticker}-${dateKey}-${timeWindow}-explore-v2`;
+  // When forceSeed is provided (force refresh), it breaks determinism so different stocks get picked
+  const seed = `${ticker}-${dateKey}-${timeWindow}-explore-v2${forceSeed}`;
   const rand = seededRandom(seed);
   // Secondary seed based purely on date to add per-day variance
-  const daySeed = seededRandom(`${dateKey}-daily-shuffle-${ticker}`);
+  const daySeed = seededRandom(`${dateKey}-daily-shuffle-${ticker}${forceSeed}`);
 
   const history = tickerHistory?.[ticker];
   let explorationWeight = 0.6;
@@ -302,7 +303,7 @@ const generateThesis = (ticker, company, m, categoryId, catLabel) => {
 const MAX_CHARTS_PER_CATEGORY = 5;
 
 const fetchAndEnrichCandidates = async (categoryId, opts = {}) => {
-  const { learnedAdj, dateKey, timeWindow, tickerHistory } = opts;
+  const { learnedAdj, dateKey, timeWindow, tickerHistory, forceSeed } = opts;
   const cat = CATEGORIES.find(c => c.id === categoryId);
   const tickers = (CANDIDATES[categoryId] || []).map(c => c.ticker);
   if (!tickers.length || !cat) return [];
@@ -344,8 +345,9 @@ const fetchAndEnrichCandidates = async (categoryId, opts = {}) => {
     const { raw, weighted, hirsch_score } = computeSignalScores(metrics, categoryId, learnedAdj);
 
     // Exploration bonus: stochastic component that changes at each refresh gate
+    // forceSeed breaks determinism on force refresh so different stocks get picked
     const bonus = dateKey
-      ? computeExplorationBonus(ticker, dateKey, timeWindow || 'early', tickerHistory)
+      ? computeExplorationBonus(ticker, dateKey, timeWindow || 'early', tickerHistory, forceSeed || '')
       : 0;
     const adjusted_score = Math.min(99, hirsch_score + bonus);
 
@@ -519,8 +521,13 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   store.daily_picks ||= {};
   store.track_record ||= [];
 
-  // When force=true, delete the cached entry for today so we start completely fresh
-  if (force && store.daily_picks[dateKey]) {
+  // When force=true, save the old tickers so we can exclude them (ensuring different picks),
+  // then delete the cached entry so we regenerate from scratch
+  let forcedOutTickers = [];
+  if (force && store.daily_picks[dateKey]?.picks) {
+    forcedOutTickers = Object.values(store.daily_picks[dateKey].picks)
+      .map(p => p.ticker)
+      .filter(t => t && t !== 'N/A');
     delete store.daily_picks[dateKey];
   }
 
@@ -589,9 +596,8 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
         const expectedCount = Object.keys(prev.picks).length;
         const hasValidRecords = existingPrevRecords.length >= expectedCount &&
           existingPrevRecords.every(r => r.reference_price > 0 && r.close > 0);
-        // Only rebuild when records are actually missing/invalid — force flag is
-        // for regenerating picks, not re-fetching already-valid track records.
-        if (!hasValidRecords) {
+        // Rebuild when records are missing/invalid, or when force=true to get latest close data
+        if (force || !hasValidRecords) {
           for (const pick of Object.values(prev.picks)) {
             backfillJobs.push({ pick, prevKey });
           }
@@ -637,6 +643,10 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
   // Time window — use override (for pre-generation) or current
   const timeWindow = timeWindowOverride || getTimeWindow();
 
+  // When force=true, generate a unique seed so exploration bonuses differ from the cached run.
+  // This ensures force refresh actually produces different stock picks.
+  const forceSeed = force ? `-f${Date.now()}` : '';
+
   // ── Generate fresh picks using live data + learning for all categories ──
   const usedTickers = new Set();
   const excludedTickers = new Set();
@@ -658,6 +668,12 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
       }
       rotScanKey = rotPrevKey;
     }
+  }
+
+  // Exclude tickers from the previous force-refreshed picks so new picks are different
+  for (const t of forcedOutTickers) {
+    usedTickers.add(t);
+    excludedTickers.add(t);
   }
 
   // Exclude current day's cached tickers when explicit rotation is needed (version bump or ?rotate=true)
@@ -683,6 +699,7 @@ export const generateDailyPicks = async (dateKey, { force = false, rotate = fals
       learnedAdj: learnedWeights[c.id] || null,
       timeWindow,
       tickerHistory,
+      forceSeed,
     }))
   );
 
