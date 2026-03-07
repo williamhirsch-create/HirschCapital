@@ -410,7 +410,8 @@ export default function App() {
     try {
       // Cache-bust with timestamp when forced to defeat any CDN caching
       const bust = force ? `&_t=${Date.now()}` : '';
-      const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8${bust}`, force ? { cache: 'no-store' } : {});
+      const forceParam = force ? '&force=true' : '';
+      const r = await fetch(`/api/track-record?category=${encodeURIComponent(id)}&limit=8${forceParam}${bust}`, force ? { cache: 'no-store' } : {});
       if (!r.ok) throw new Error(`Track record fetch failed`);
       const data = await r.json();
       const rows = (data.rows || []).map(row => ({
