@@ -4,7 +4,7 @@ const PriceChart = lazy(() => import("./src/PriceChart.jsx"));
 
 // One-time force refresh: on this date (ET), the initial page load will
 // bypass cached picks and regenerate all categories + track records fresh.
-const FORCE_REFRESH_DATE = '2026-03-07';
+const FORCE_REFRESH_DATE = '2026-04-02';
 
 const VALID_PAGES = ["home","pick","track","method","about"];
 const pageFromPath = () => {
@@ -40,20 +40,20 @@ const SIGS = {
 // Sources: Yahoo Finance, SEC filings, company investor relations. Values are representative snapshots.
 const STATIC_PICKS = {
   penny: {
-    ticker: "SNDL", company: "SNDL Inc", exchange: "NASDAQ",
-    price: 1.92, change_pct: 4.5, market_cap: "520M", avg_volume: "28.1M",
-    relative_volume: 2.3, atr_pct: 9.1, float_val: "245.8M", short_interest: "11.2%",
-    gap_pct: 2.8, premarket_vol: "2.9M", hirsch_score: 81,
-    what_it_is: "SNDL Inc is a Canadian cannabis company that produces, distributes, and sells cannabis products for adult recreational use. The company also operates retail cannabis stores and has expanded into liquor retail through its SunStream subsidiary. SNDL is listed on NASDAQ and focused on the Canadian market.",
-    thesis_summary: "SNDL ranks highest in the Penny Stocks category with strong volatility and volume surge signals|9.1% ATR with 2.3x relative volume creates an actionable momentum setup in the cannabis sector|5-day momentum and RSI positioning indicate bullish near-term sentiment with continuation potential|Elevated trading activity and gap-up signal suggest institutional and retail interest convergence",
-    catalysts: "SNDL is showing 2.3x its average daily volume, indicating heightened market interest in cannabis stocks.\n\nThe stock gapped up 2.8% from the previous close, reflecting positive overnight positioning tied to cannabis sector catalysts and regulatory developments.",
-    upside_drivers: "Primary driver is continuation under the 9.1% ATR volatility regime with 2.3x volume supporting directional moves. A break above the 20-day high on sustained volume could trigger momentum algorithms and extend the rally toward the next resistance zone.",
-    key_levels: "Support at $1.65 (20-day low). Resistance at $2.28 (20-day high). Moving average at $1.84. Current price $1.92 is 4.3% above the MA.",
-    risks: "Volatility risk — 9.1% ATR means wide intraday swings, potential halts, and gap risk|Volume fade risk — if relative volume drops below 1.0x, momentum thesis weakens significantly|Regulatory risk — cannabis sector sensitive to policy changes and legislative timelines",
-    invalidation: "Price breaks below $1.65 support on heavy volume|Relative volume collapses below 0.8x average daily turnover|RSI drops below 40 on a closing basis, indicating momentum failure",
-    signal_values: "9.1%|2.3x|+2.8%|+7.2%|1.5x|58|+4.3%",
+    ticker: "SOUN", company: "SoundHound AI Inc", exchange: "NASDAQ",
+    price: 3.45, change_pct: 5.2, market_cap: "820M", avg_volume: "32.5M",
+    relative_volume: 2.5, atr_pct: 10.2, float_val: "198.3M", short_interest: "9.8%",
+    gap_pct: 3.1, premarket_vol: "3.2M", hirsch_score: 83,
+    what_it_is: "SoundHound AI Inc develops voice artificial intelligence solutions. The company provides conversational intelligence platforms used in automotive, TV, IoT, and customer service applications. SoundHound's technology enables natural language understanding and voice-enabled product experiences.",
+    thesis_summary: "SoundHound AI ranks highest in the Penny Stocks category with strong volatility and volume surge signals|10.2% ATR with 2.5x relative volume creates an actionable momentum setup in the AI voice sector|5-day momentum and RSI positioning indicate bullish near-term sentiment with continuation potential|Elevated trading activity and gap-up signal suggest institutional and retail interest convergence",
+    catalysts: "SOUN is showing 2.5x its average daily volume, indicating heightened market interest in AI voice technology stocks.\n\nThe stock gapped up 3.1% from the previous close, reflecting positive overnight positioning tied to AI sector catalysts and enterprise adoption.",
+    upside_drivers: "Primary driver is continuation under the 10.2% ATR volatility regime with 2.5x volume supporting directional moves. A break above the 20-day high on sustained volume could trigger momentum algorithms and extend the rally toward the next resistance zone.",
+    key_levels: "Support at $2.90 (20-day low). Resistance at $4.10 (20-day high). Moving average at $3.28. Current price $3.45 is 5.2% above the MA.",
+    risks: "Volatility risk — 10.2% ATR means wide intraday swings, potential halts, and gap risk|Volume fade risk — if relative volume drops below 1.0x, momentum thesis weakens significantly|Competition risk — AI voice sector has intense competition from major tech companies",
+    invalidation: "Price breaks below $2.90 support on heavy volume|Relative volume collapses below 0.8x average daily turnover|RSI drops below 40 on a closing basis, indicating momentum failure",
+    signal_values: "10.2%|2.5x|+3.1%|+8.4%|1.6x|61|+5.2%",
     signal_weights: "22|20|14|12|10|12|10",
-    signal_reasons: "ATR at 9.1% indicates high volatility regime — favorable for directional moves in penny stocks|2.3x average volume signals above-average institutional and retail participation|+2.8% gap suggests positive overnight catalyst absorption from cannabis sector|Strong bullish 5-day momentum at +7.2% confirms short-term trend|Volume accelerating at 1.5x recent trend — building conviction for continuation|RSI at 58 — bullish momentum with room to run before overbought territory|Trading 4.3% above moving average — mild bullish positioning confirmed",
+    signal_reasons: "ATR at 10.2% indicates high volatility regime — favorable for directional moves in penny stocks|2.5x average volume signals above-average institutional and retail participation|+3.1% gap suggests positive overnight catalyst absorption from AI sector|Strong bullish 5-day momentum at +8.4% confirms short-term trend|Volume accelerating at 1.6x recent trend — building conviction for continuation|RSI at 61 — bullish momentum with room to run before overbought territory|Trading 5.2% above moving average — mild bullish positioning confirmed",
   },
   small: {
     ticker: "RKLB", company: "Rocket Lab USA Inc", exchange: "NASDAQ",
@@ -125,6 +125,7 @@ const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0
 const US_HOLIDAYS = new Set([
   "2025-01-01","2025-01-20","2025-02-17","2025-04-18","2025-05-26","2025-06-19","2025-07-04","2025-09-01","2025-11-27","2025-12-25",
   "2026-01-01","2026-01-19","2026-02-16","2026-04-03","2026-05-25","2026-06-19","2026-07-03","2026-09-07","2026-11-26","2026-12-25",
+  "2027-01-01","2027-01-18","2027-02-15","2027-03-26","2027-05-31","2027-06-18","2027-07-05","2027-09-06","2027-11-25","2027-12-24",
 ]);
 const isMktOpen = (dt) => { const day = dt.getDay(); if (day === 0 || day === 6) return false; return !US_HOLIDAYS.has(ymd(dt)); };
 const mktDay = (from = new Date()) => { const dt = new Date(from); let guard = 0; while (!isMktOpen(dt) && guard++ < 10) dt.setDate(dt.getDate() - 1); return dt; };
@@ -705,10 +706,12 @@ export default function App() {
     }
   }, []);
 
-  // Periodic refresh: detect ET date change (midnight), 8:30 AM pre-market, and 9:30 AM market-open
+  // Periodic refresh: detect ET date change (midnight), 8:30 AM pre-market, 9:30 AM market-open,
+  // and refresh live quotes every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
   const lastETDateRef = useRef(getETDate());
   const preMarketRefreshDone = useRef(false);  // 8:30 AM gate
   const marketOpenRefreshDone = useRef(false);  // 9:30 AM gate
+  const lastLiveRefreshRef = useRef(0);         // timestamp of last mid-day live refresh
   useEffect(() => {
     const getETMinutes = () => {
       try {
@@ -730,6 +733,14 @@ export default function App() {
       preloadStarted.current = false;
       preloadAllData({ forceRefresh, isGateRefresh });
     };
+    const triggerLiveQuoteRefresh = () => {
+      // Lightweight refresh: only re-fetch quotes and charts (don't regenerate picks)
+      if (preloadingRef.current) return;
+      quoteCacheRef.current = {};
+      gfCacheRef.current = {};
+      preloadStarted.current = false;
+      preloadAllData({ forceRefresh: false, isGateRefresh: false });
+    };
     const checkRefresh = () => {
       try {
         const etDate = getETDate();
@@ -739,6 +750,7 @@ export default function App() {
           lastETDateRef.current = etDate;
           preMarketRefreshDone.current = false;
           marketOpenRefreshDone.current = false;
+          lastLiveRefreshRef.current = 0;
           const d = new Date(etDate + "T12:00:00Z");
           const day = d.getUTCDay();
           if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
@@ -747,7 +759,6 @@ export default function App() {
           return;
         }
         // Gate 1 — 8:30 AM ET: fetch pre-generated picks (cron already generated them before 8:30)
-        // No force needed — backend staleness check handles fallback if cron missed
         if (mins >= 510 && !preMarketRefreshDone.current) {
           preMarketRefreshDone.current = true;
           const d = new Date(etDate + "T12:00:00Z");
@@ -763,6 +774,21 @@ export default function App() {
           const day = d.getUTCDay();
           if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
             triggerRefresh({ forceRefresh: false, isGateRefresh: true });
+          }
+        }
+        // Mid-day live quote refresh: every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+        // This keeps prices, charts, and metrics current throughout the trading day
+        const isMarketHours = mins >= 570 && mins <= 960; // 9:30 AM - 4:00 PM
+        if (isMarketHours) {
+          const now = Date.now();
+          const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
+          if (now - lastLiveRefreshRef.current >= REFRESH_INTERVAL) {
+            lastLiveRefreshRef.current = now;
+            const d = new Date(etDate + "T12:00:00Z");
+            const day = d.getUTCDay();
+            if (day !== 0 && day !== 6 && !US_HOLIDAYS.has(etDate)) {
+              triggerLiveQuoteRefresh();
+            }
           }
         }
         // Reset flags before 8:30 AM so they trigger again next morning

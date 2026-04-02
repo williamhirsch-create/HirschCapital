@@ -4,7 +4,7 @@
     "api/cron/daily-picks.js": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/cron/daily-picks", "schedule": "0,15,27,30,45 12,13,14 * * 1-5" }
+    { "path": "/api/cron/daily-picks", "schedule": "0,15,27,30,45 12,13,14,20 * * 1-5" }
   ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },

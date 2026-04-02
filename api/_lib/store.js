@@ -21,12 +21,28 @@ const writeFileStore = async (data) => {
   await fs.writeFile(FILE_PATH, JSON.stringify(data, null, 2));
 };
 
+const DEFAULT_STORE = { daily_picks: {}, track_record: [], learning: { weight_adjustments: {}, ticker_history: {}, last_learned: null } };
+
 export const getStore = async () => {
   if (KV_URL && KV_TOKEN) {
-    const d = await kvFetch(['get', 'hirsch_store']);
-    return d?.result ? JSON.parse(d.result) : { daily_picks: {}, track_record: [] };
+    try {
+      const d = await kvFetch(['get', 'hirsch_store']);
+      const parsed = d?.result ? JSON.parse(d.result) : null;
+      if (parsed) {
+        // Ensure all expected fields exist (migration safety)
+        parsed.daily_picks ||= {};
+        parsed.track_record ||= [];
+        parsed.learning ||= { weight_adjustments: {}, ticker_history: {}, last_learned: null };
+        return parsed;
+      }
+    } catch { /* fall through to default */ }
+    return { ...DEFAULT_STORE };
   }
-  return readFileStore();
+  const store = await readFileStore();
+  store.daily_picks ||= {};
+  store.track_record ||= [];
+  store.learning ||= { weight_adjustments: {}, ticker_history: {}, last_learned: null };
+  return store;
 };
 
 export const setStore = async (next) => {

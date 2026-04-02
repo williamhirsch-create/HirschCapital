@@ -11,21 +11,21 @@ export const CATEGORIES = [
 // Broad candidate universe per category — live data filters & validates each ticker
 export const CANDIDATES = {
   penny: [
-    { ticker: 'MVST', company: 'Microvast Holdings Inc', exchange: 'NASDAQ' },
     { ticker: 'BBAI', company: 'BigBear.ai Holdings', exchange: 'NYSE' },
     { ticker: 'SNDL', company: 'SNDL Inc', exchange: 'NASDAQ' },
     { ticker: 'CLOV', company: 'Clover Health Investments', exchange: 'NASDAQ' },
-    { ticker: 'NKLA', company: 'Nikola Corporation', exchange: 'NASDAQ' },
-    { ticker: 'WKHS', company: 'Workhorse Group Inc', exchange: 'NASDAQ' },
     { ticker: 'FCEL', company: 'FuelCell Energy Inc', exchange: 'NASDAQ' },
-    { ticker: 'SKLZ', company: 'Skillz Inc', exchange: 'NYSE' },
     { ticker: 'GFAI', company: 'Guardforce AI Co', exchange: 'NASDAQ' },
-    { ticker: 'BNGO', company: 'Bionano Genomics Inc', exchange: 'NASDAQ' },
-    { ticker: 'PSNY', company: 'Polestar Automotive', exchange: 'NASDAQ' },
-    { ticker: 'GOEV', company: 'Canoo Inc', exchange: 'NASDAQ' },
-    { ticker: 'DNA', company: 'Ginkgo Bioworks', exchange: 'NYSE' },
     { ticker: 'PLUG', company: 'Plug Power Inc', exchange: 'NASDAQ' },
-    { ticker: 'BIOR', company: 'Biora Therapeutics', exchange: 'NASDAQ' },
+    { ticker: 'TELL', company: 'Tellurian Inc', exchange: 'NYSE' },
+    { ticker: 'SOUN', company: 'SoundHound AI Inc', exchange: 'NASDAQ' },
+    { ticker: 'GRAB', company: 'Grab Holdings Ltd', exchange: 'NASDAQ' },
+    { ticker: 'APLD', company: 'Applied Digital Corp', exchange: 'NASDAQ' },
+    { ticker: 'HIMS', company: 'Hims & Hers Health Inc', exchange: 'NYSE' },
+    { ticker: 'GSAT', company: 'Globalstar Inc', exchange: 'NYSE' },
+    { ticker: 'BITF', company: 'Bitfarms Ltd', exchange: 'NASDAQ' },
+    { ticker: 'BTBT', company: 'Bit Digital Inc', exchange: 'NASDAQ' },
+    { ticker: 'IREN', company: 'Iris Energy Ltd', exchange: 'NASDAQ' },
   ],
   small: [
     { ticker: 'IONQ', company: 'IonQ Inc', exchange: 'NYSE' },
@@ -36,13 +36,13 @@ export const CANDIDATES = {
     { ticker: 'MARA', company: 'Marathon Digital Holdings', exchange: 'NASDAQ' },
     { ticker: 'RIOT', company: 'Riot Platforms Inc', exchange: 'NASDAQ' },
     { ticker: 'OPEN', company: 'Opendoor Technologies', exchange: 'NASDAQ' },
-    { ticker: 'STEM', company: 'Stem Inc', exchange: 'NYSE' },
     { ticker: 'MP', company: 'MP Materials Corp', exchange: 'NYSE' },
-    { ticker: 'DM', company: 'Desktop Metal Inc', exchange: 'NYSE' },
     { ticker: 'RDW', company: 'Redwire Corporation', exchange: 'NYSE' },
     { ticker: 'AEHR', company: 'Aehr Test Systems', exchange: 'NASDAQ' },
     { ticker: 'CELH', company: 'Celsius Holdings Inc', exchange: 'NASDAQ' },
     { ticker: 'SOFI', company: 'SoFi Technologies Inc', exchange: 'NASDAQ' },
+    { ticker: 'LUNR', company: 'Intuitive Machines Inc', exchange: 'NASDAQ' },
+    { ticker: 'RXRX', company: 'Recursion Pharmaceuticals', exchange: 'NASDAQ' },
   ],
   mid: [
     { ticker: 'CRWD', company: 'CrowdStrike Holdings', exchange: 'NASDAQ' },
@@ -116,4 +116,4 @@ export const SIGNAL_WEIGHTS = {
 };
 
 // Algorithm version — bump to force regeneration when algorithm changes
-export const ALGO_VERSION = 13;
+export const ALGO_VERSION = 14;
